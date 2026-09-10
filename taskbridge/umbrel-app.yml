@@ -1,0 +1,45 @@
+manifestVersion: 1
+id: taskbridge
+name: TaskBridge
+tagline: Two-way sync between Microsoft To Do and Todoist
+icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
+category: automation
+version: "1.0.0"
+port: 3737
+description: >-
+  TaskBridge keeps your tasks in sync — both directions — between Microsoft To Do
+  and Todoist. Add or check off a task in either app and it shows up in the other
+  within a minute.
+
+
+  What it syncs: task title, notes, due date, completion, and priority (as an
+  "important" flag). Lists and projects are matched by name; a missing one is
+  created on the other side. Completing a task in one app completes it in the
+  other; deleting deletes both.
+
+
+  Setup takes about a minute: paste a Todoist API token, then sign in to
+  Microsoft by entering a short code — no Azure account or developer setup
+  needed. Everything runs on your Umbrel; the only outbound traffic is to
+  Microsoft and Todoist.
+
+
+  Not synced: time-of-day on due dates (only the date), sub-tasks / checklist
+  items, and recurrence rules (a recurring task still syncs its next due date).
+developer: Payam Ghavi
+website: https://github.com/payam-ghavi/taskbridge
+submitter: Payam Ghavi
+submission: https://github.com/payam-ghavi/taskbridge
+repo: https://github.com/payam-ghavi/taskbridge
+support: https://github.com/payam-ghavi/taskbridge/issues
+gallery:
+  - 1.png
+  - 2.png
+  - 3.png
+releaseNotes: >-
+  First release. Two-way sync of title, notes, due date, completion and priority
+  between Microsoft To Do and Todoist, with a one-minute setup.
+dependencies: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""

@@ -1,0 +1,125 @@
+"""Thin wrapper over the Todoist Sync API (unified v1).
+
+The Sync API gives an *incremental* feed: each call returns a ``sync_token``;
+passing it back next time yields only what changed. That's the Todoist half of
+the change-detection the engine relies on.
+"""
+import json
+import logging
+import time
+import uuid
+
+import requests
+
+log = logging.getLogger("taskbridge.todoist")
+
+BASE = "https://api.todoist.com/api/v1"
+
+
+def _uuid():
+    return str(uuid.uuid4())
+
+
+def validate_token(token):
+    """Return the account's name/email, or raise ValueError if the token is bad."""
+    r = requests.post(f"{BASE}/sync", headers={"Authorization": f"Bearer {token}"},
+                      data={"sync_token": "*", "resource_types": '["user"]'}, timeout=30)
+    if r.status_code in (401, 403):
+        raise ValueError("Todoist rejected that token.")
+    r.raise_for_status()
+    u = (r.json() or {}).get("user")
+    if not u:
+        raise ValueError("Todoist rejected that token.")
+    return u.get("full_name") or u.get("email") or "Todoist account"
+
+
+class TodoistClient:
+    def __init__(self, token, sync_token, base=BASE, dry_run=False):
+        self.base = base.rstrip("/")
+        self.dry_run = dry_run
+        self.sync_token = sync_token or "*"
+        self.s = requests.Session()
+        self.s.headers["Authorization"] = f"Bearer {token}"
+        self.items = {}
+        self.projects = {}
+
+    def _sync(self, resource_types, commands=None):
+        data = {"sync_token": self.sync_token, "resource_types": json.dumps(resource_types)}
+        if commands:
+            data["commands"] = json.dumps(commands)
+        for attempt in range(5):
+            r = self.s.post(f"{self.base}/sync", data=data, timeout=90)
+            if r.status_code == 429:
+                time.sleep(int(r.headers.get("Retry-After", "5")))
+                continue
+            r.raise_for_status()
+            break
+        j = r.json()
+        self.sync_token = j["sync_token"]
+        for it in j.get("items", []):
+            self.items[it["id"]] = it
+        for pr in j.get("projects", []):
+            self.projects[pr["id"]] = pr
+        return j
+
+    def read(self):
+        return self._sync(["projects", "items"])
+
+    def apply(self, commands):
+        if not commands or self.dry_run:
+            return {}, {}
+        temp_map, status = {}, {}
+        for i in range(0, len(commands), 90):
+            j = self._sync(["projects", "items"], commands[i:i + 90])
+            temp_map.update(j.get("temp_id_mapping", {}))
+            status.update(j.get("sync_status", {}))
+        for cid, result in status.items():
+            if result != "ok" and not (isinstance(result, dict) and result.get("error_code") is None):
+                log.warning("todoist command %s -> %s", cid, result)
+        return temp_map, status
+
+    def add_project(self, name):
+        temp = _uuid()
+        temp_map, _ = self.apply([{
+            "type": "project_add", "temp_id": temp, "uuid": _uuid(), "args": {"name": name},
+        }])
+        return temp_map.get(temp)
+
+
+def cmd_item_add(c, project_id, temp_id):
+    args = {"content": c["title"], "project_id": project_id}
+    if c["notes"]:
+        args["description"] = c["notes"]
+    if c["due"]:
+        args["due"] = {"date": c["due"]}
+    if c["important"]:
+        args["priority"] = 4
+    cmds = [{"type": "item_add", "temp_id": temp_id, "uuid": _uuid(), "args": args}]
+    if c["completed"]:
+        cmds.append({"type": "item_complete", "uuid": _uuid(), "args": {"id": temp_id}})
+    return cmds
+
+
+def cmd_item_update(item_id, new_c, prev_c):
+    cmds = []
+    args = {"id": item_id}
+    if new_c["title"] != prev_c["title"]:
+        args["content"] = new_c["title"]
+    if new_c["notes"] != prev_c["notes"]:
+        args["description"] = new_c["notes"]
+    if new_c["due"] != prev_c["due"]:
+        args["due"] = {"date": new_c["due"]} if new_c["due"] else None
+    if new_c["important"] != prev_c["important"]:
+        args["priority"] = 4 if new_c["important"] else 1
+    if len(args) > 1:
+        cmds.append({"type": "item_update", "uuid": _uuid(), "args": args})
+    if new_c["completed"] != prev_c["completed"]:
+        cmds.append({
+            "type": "item_complete" if new_c["completed"] else "item_uncomplete",
+            "uuid": _uuid(), "args": {"id": item_id},
+        })
+    return cmds
+
+
+def cmd_item_delete(item_id):
+    return {"type": "item_delete", "uuid": _uuid(), "args": {"id": item_id}}

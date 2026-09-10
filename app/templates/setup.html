@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Set up TaskBridge{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Connect your two apps</h2>
+  <p class="sub">TaskBridge keeps tasks in sync both ways between Microsoft&nbsp;To&nbsp;Do and Todoist. Nothing leaves this device except calls to Microsoft and Todoist.</p>
+
+  <!-- Step 1: Todoist -->
+  <div class="step {% if todoist_name %}done{% endif %}" id="step-td">
+    <div class="num">{% if todoist_name %}✓{% else %}1{% endif %}</div>
+    <div class="body">
+      <h3>Todoist</h3>
+      <div id="td-connected" class="msg ok" {% if not todoist_name %}hidden{% endif %}>
+        Connected as <b>{{ todoist_name }}</b> · <a href="#" onclick="tdReset(event)">change</a>
+      </div>
+      <div id="td-form" {% if todoist_name %}hidden{% endif %}>
+        <label>API token
+          <span class="hint">Todoist → Settings → Integrations → Developer → API token</span>
+        </label>
+        <input type="password" id="td-token" placeholder="0123456789abcdef…" autocomplete="off">
+        <div class="row" style="margin-top:10px">
+          <button class="small" onclick="tdConnect()">Connect</button>
+          <span id="td-msg" class="msg"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Microsoft -->
+  <div class="step {% if ms_email %}done{% endif %}" id="step-ms" style="margin-top:6px">
+    <div class="num">{% if ms_email %}✓{% else %}2{% endif %}</div>
+    <div class="body">
+      <h3>Microsoft</h3>
+      <div id="ms-connected" class="msg ok" {% if not ms_email %}hidden{% endif %}>
+        Connected as <b>{{ ms_email }}</b> · <a href="#" onclick="msReset(event)">change</a>
+      </div>
+      <div id="ms-start" {% if ms_email %}hidden{% endif %}>
+        <button class="small" onclick="msConnect()">Connect Microsoft</button>
+      </div>
+      <div id="ms-pending" hidden>
+        <p class="hint" style="margin-top:10px">Open this page and enter the code:</p>
+        <div class="code" id="ms-code">— — —</div>
+        <div class="row">
+          <a class="btn small" id="ms-link" target="_blank" rel="noopener">Open microsoft.com/devicelogin ↗</a>
+          <span class="msg" id="ms-msg">Waiting for you to sign in…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: options -->
+  <div class="step" id="step-opt" style="margin-top:6px">
+    <div class="num">3</div>
+    <div class="body">
+      <h3>Options</h3>
+      <form method="post" action="{{ url_for('save_settings') }}">
+        <div class="field-row">
+          <div>
+            <label>Sync every</label>
+            <select name="sync_interval">
+              <option value="60" {{ 'selected' if settings.sync_interval=='60' }}>1 minute</option>
+              <option value="300" {{ 'selected' if settings.sync_interval=='300' }}>5 minutes</option>
+              <option value="900" {{ 'selected' if settings.sync_interval=='900' }}>15 minutes</option>
+            </select>
+          </div>
+          <div>
+            <label>If edited on both sides, keep</label>
+            <select name="conflict_winner">
+              <option value="todoist" {{ 'selected' if settings.conflict_winner=='todoist' }}>Todoist's version</option>
+              <option value="mstodo" {{ 'selected' if settings.conflict_winner=='mstodo' }}>To Do's version</option>
+            </select>
+          </div>
+        </div>
+        <div class="row" style="margin-top:16px">
+          <button id="finish" type="submit" {% if not (todoist_name and ms_email) %}disabled{% endif %}>
+            Start syncing
+          </button>
+          <span class="hint">Lists and projects are matched by name; missing ones are created on the other side.</span>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<p class="hint" style="text-align:center">
+  Synced: title, notes, due date, completion, priority (as an “important” flag).
+  Not synced: time-of-day on due dates, sub-tasks, recurrence rules.
+</p>
+{% endblock %}
+
+{% block script %}
+<script>
+const $ = s => document.querySelector(s);
+
+async function post(url, body) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: body ? {'Content-Type': 'application/json'} : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return r.json();
+}
+
+/* ---- Todoist ---- */
+async function tdConnect() {
+  const token = $('#td-token').value.trim();
+  const msg = $('#td-msg');
+  if (!token) { msg.textContent = 'Paste your token.'; msg.className = 'msg err'; return; }
+  msg.textContent = 'Checking…'; msg.className = 'msg';
+  const res = await post('/connect/todoist', {token});
+  if (res.ok) location.reload();
+  else { msg.textContent = res.error || 'Failed.'; msg.className = 'msg err'; }
+}
+function tdReset(e){ e.preventDefault(); const f=new FormData(); f.append('which','todoist');
+  fetch('/disconnect',{method:'POST',body:f}).then(()=>location.reload()); }
+
+/* ---- Microsoft device code ---- */
+let msTimer = null;
+async function msConnect() {
+  $('#ms-start').hidden = true;
+  $('#ms-pending').hidden = false;
+  $('#ms-msg').textContent = 'Starting…'; $('#ms-msg').className = 'msg';
+  const res = await post('/connect/microsoft/start');
+  if (!res.ok) { $('#ms-msg').textContent = res.error || 'Failed.'; $('#ms-msg').className = 'msg err'; return; }
+  $('#ms-code').textContent = res.user_code;
+  $('#ms-link').href = res.verification_uri;
+  $('#ms-msg').textContent = 'Waiting for you to sign in…';
+  const deadline = Date.now() + (res.expires_in * 1000);
+  const poll = async () => {
+    if (Date.now() > deadline) { $('#ms-msg').textContent = 'Code expired — try again.'; $('#ms-msg').className='msg err'; return; }
+    const p = await post('/connect/microsoft/poll', {device_code: res.device_code});
+    if (p.status === 'success') { location.reload(); return; }
+    if (p.status === 'error') { $('#ms-msg').textContent = p.error || 'Sign-in failed.'; $('#ms-msg').className='msg err'; return; }
+    msTimer = setTimeout(poll, (res.interval || 5) * 1000);
+  };
+  msTimer = setTimeout(poll, (res.interval || 5) * 1000);
+}
+function msReset(e){ e.preventDefault(); const f=new FormData(); f.append('which','microsoft');
+  fetch('/disconnect',{method:'POST',body:f}).then(()=>location.reload()); }
+</script>
+{% endblock %}

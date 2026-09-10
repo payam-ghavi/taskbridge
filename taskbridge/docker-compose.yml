@@ -1,0 +1,17 @@
+version: "3.7"
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: taskbridge_web_1
+      APP_PORT: 3737
+
+  web:
+    image: ghcr.io/payam-ghavi/taskbridge:1.0.0
+    restart: on-failure
+    stop_grace_period: 20s
+    environment:
+      PORT: 3737
+      TASKBRIDGE_DATA: /data
+    volumes:
+      - ${APP_DATA_DIR}/data:/data

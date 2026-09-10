@@ -1,0 +1,92 @@
+:root {
+  --bg: #0f1115;
+  --card: #181b21;
+  --card2: #1f232b;
+  --line: #2a2f3a;
+  --text: #e7e9ee;
+  --muted: #9aa3b2;
+  --accent: #5b8cff;
+  --accent-d: #3f6fe0;
+  --ok: #3fce8f;
+  --warn: #ffb454;
+  --err: #ff6b6b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+a { color: var(--accent); }
+.wrap { max-width: 640px; margin: 0 auto; padding: 28px 20px 60px; }
+header.top { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+header.top .logo { font-size: 22px; }
+header.top h1 { font-size: 19px; margin: 0; font-weight: 650; }
+header.top .ver { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 18px; margin-bottom: 14px;
+}
+.card h2 { margin: 0 0 4px; font-size: 15px; font-weight: 650; }
+.card .sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+.row { display: flex; align-items: center; gap: 10px; }
+.row + .row { margin-top: 10px; }
+.spacer { flex: 1; }
+
+.pill { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--card2); color: var(--muted); }
+.pill.ok { color: var(--ok); background: rgba(63,206,143,.12); }
+.pill.warn { color: var(--warn); background: rgba(255,180,84,.12); }
+.pill.err { color: var(--err); background: rgba(255,107,107,.12); }
+.pill.live { color: var(--accent); background: rgba(91,140,255,.14); }
+
+label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 5px; }
+input[type=text], input[type=password], input[type=number], select {
+  width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--card2); color: var(--text); font-size: 14px;
+}
+input:focus, select:focus { outline: 2px solid var(--accent-d); border-color: transparent; }
+
+button, .btn {
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  padding: 9px 16px; border-radius: 10px; border: 1px solid transparent;
+  background: var(--accent); color: #fff;
+}
+button.secondary, .btn.secondary { background: var(--card2); color: var(--text); border-color: var(--line); }
+button.ghost { background: transparent; color: var(--muted); border-color: var(--line); }
+button:disabled { opacity: .5; cursor: default; }
+button.small { padding: 6px 11px; font-size: 13px; }
+
+.step { display: flex; gap: 12px; }
+.step .num {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--card2); border: 1px solid var(--line); font-size: 13px; font-weight: 700;
+}
+.step.done .num { background: rgba(63,206,143,.15); color: var(--ok); border-color: transparent; }
+.step .body { flex: 1; padding-bottom: 4px; }
+.step h3 { margin: 2px 0 6px; font-size: 14px; }
+
+.code {
+  font: 600 26px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 3px;
+  background: var(--card2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px 16px; text-align: center; margin: 10px 0;
+}
+.hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.msg { font-size: 13px; margin-top: 8px; }
+.msg.ok { color: var(--ok); }
+.msg.err { color: var(--err); }
+
+.banner { border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; }
+.banner.err { background: rgba(255,107,107,.12); color: var(--err); border: 1px solid rgba(255,107,107,.25); }
+.banner.warn { background: rgba(255,180,84,.12); color: var(--warn); border: 1px solid rgba(255,180,84,.25); }
+
+.feed { margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.feed li { display: flex; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); color: var(--muted); }
+.feed li:first-child { border-top: 0; }
+.feed .t { flex: none; width: 62px; }
+.feed .lvl-error { color: var(--err); }
+.feed .lvl-warn { color: var(--warn); }
+
+details.settings summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
+.field-row { display: flex; gap: 14px; }
+.field-row > div { flex: 1; }

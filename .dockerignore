@@ -1,0 +1,11 @@
+.git
+.github
+__pycache__
+*.pyc
+.venv
+venv
+*.md
+taskbridge/
+umbrel-app-store.yml
+tests/
+data/

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}TaskBridge{% endblock %}
+{% block content %}
+
+{% if ms_auth_expired %}
+<div class="banner warn">
+  Microsoft sign-in expired. <a href="{{ url_for('setup') }}">Reconnect</a> to resume syncing.
+</div>
+{% elif last_error %}
+<div class="banner err">Last sync failed: {{ last_error }}</div>
+{% endif %}
+
+<div class="card">
+  <div class="row">
+    <h2 style="margin:0">Status</h2>
+    <span class="spacer"></span>
+    <span class="pill {{ 'live' if running=='syncing' else 'ok' if running=='idle' else 'warn' }}" id="pill-status">
+      {{ 'Syncing…' if running=='syncing' else 'Active' if running=='idle' else running }}
+    </span>
+  </div>
+  <div class="row" style="margin-top:12px; color:var(--muted); font-size:13px">
+    <span>Last sync: <b id="last-sync">{{ last_sync }}</b></span>
+    <span class="spacer"></span>
+    <span id="last-result">{{ last_result }}</span>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <button class="small" onclick="syncNow(this)">Sync now</button>
+    <span class="hint">{{ mapping_count }} tasks linked · {{ pair_count }} list pairs</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Accounts</h2>
+  <div class="row" style="margin-top:8px">
+    <span>🔵 Todoist</span><span class="spacer"></span>
+    <span class="pill ok">{{ todoist_name }}</span>
+  </div>
+  <div class="row">
+    <span>🟣 Microsoft To Do</span><span class="spacer"></span>
+    <span class="pill {{ 'err' if ms_auth_expired else 'ok' }}">{{ ms_email }}</span>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <a class="btn secondary small" href="{{ url_for('setup') }}">Reconnect / change</a>
+  </div>
+</div>
+
+<div class="card">
+  <details class="settings">
+    <summary>Settings</summary>
+    <form method="post" action="{{ url_for('save_settings') }}" style="margin-top:8px">
+      <div class="field-row">
+        <div>
+          <label>Sync every</label>
+          <select name="sync_interval">
+            <option value="60"  {{ 'selected' if settings.sync_interval=='60' }}>1 minute</option>
+            <option value="300" {{ 'selected' if settings.sync_interval=='300' }}>5 minutes</option>
+            <option value="900" {{ 'selected' if settings.sync_interval=='900' }}>15 minutes</option>
+          </select>
+        </div>
+        <div>
+          <label>Conflicts keep</label>
+          <select name="conflict_winner">
+            <option value="todoist" {{ 'selected' if settings.conflict_winner=='todoist' }}>Todoist</option>
+            <option value="mstodo"  {{ 'selected' if settings.conflict_winner=='mstodo' }}>To Do</option>
+          </select>
+        </div>
+      </div>
+      <button class="small" style="margin-top:12px" type="submit">Save</button>
+    </form>
+    <form method="post" action="{{ url_for('reset_sync_state') }}" style="margin-top:16px"
+          onsubmit="return confirm('Forget all task links and re-pair from scratch on the next sync? Your tasks are not deleted.')">
+      <button class="ghost small" type="submit">Reset sync state</button>
+      <span class="hint">Use if pairings got tangled.</span>
+    </form>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Activity</h2>
+  <ul class="feed" id="feed">
+    {% for a in activity %}
+      <li><span class="t">{{ a.ts|timefmt }}</span><span class="lvl-{{ a.level }}">{{ a.message }}</span></li>
+    {% else %}
+      <li><span class="t"></span>Nothing yet.</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+async function syncNow(btn){
+  btn.disabled = true; btn.textContent = 'Syncing…';
+  await fetch('/sync-now', {method:'POST'});
+  setTimeout(refresh, 1500);
+  setTimeout(()=>{ btn.disabled=false; btn.textContent='Sync now'; }, 3000);
+}
+function fmt(ts){
+  const d = new Date(ts*1000);
+  return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+async function refresh(){
+  try {
+    const r = await fetch('/api/status'); const s = await r.json();
+    if (!s.configured) { location.reload(); return; }
+    document.getElementById('last-sync').textContent = s.last_sync;
+    document.getElementById('last-result').textContent = s.last_result;
+    const p = document.getElementById('pill-status');
+    p.textContent = s.running==='syncing' ? 'Syncing…' : s.running==='idle' ? 'Active' : s.running;
+    p.className = 'pill ' + (s.running==='syncing'?'live':s.running==='idle'?'ok':'warn');
+    const feed = document.getElementById('feed');
+    feed.innerHTML = (s.activity||[]).map(a =>
+      `<li><span class="t">${fmt(a.ts)}</span><span class="lvl-${a.level}">${a.message.replace(/[<>&]/g,'')}</span></li>`
+    ).join('') || '<li><span class="t"></span>Nothing yet.</li>';
+    if (s.ms_auth_expired || (s.last_error && !document.querySelector('.banner'))) location.reload();
+  } catch(e){}
+}
+setInterval(refresh, 5000);
+</script>
+{% endblock %}
