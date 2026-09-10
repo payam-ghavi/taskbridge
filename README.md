@@ -1,10 +1,10 @@
 # 🌉 TaskBridge
 
-Two-way sync between **Microsoft To Do** and **Todoist**. Add or check off a task
-in either app and it appears in the other within a minute. Runs as a small
-self-hosted service — an Umbrel app, or any Docker host.
+Self-hosted two-way sync between **Microsoft To Do** and **Todoist**. Add or check
+off a task in either app and it shows up in the other within a minute. One small
+container, a one-minute setup, no cloud middleman.
 
-<p align="center"><img src="taskbridge/1.png" width="640" alt="TaskBridge dashboard"></p>
+<p align="center"><img src="taskbridge/2.png" width="620" alt="TaskBridge dashboard"></p>
 
 ## What syncs
 
@@ -22,21 +22,7 @@ labels, reminders, attachments.
 **Conflicts** (same task edited on both sides between syncs): Todoist wins by
 default — switch to To Do in Settings.
 
-## Install on Umbrel
-
-1. Umbrel → **App Store** → **⋯** (top right) → **Community App Stores** → add:
-   ```
-   https://github.com/payam-ghavi/taskbridge
-   ```
-2. Open the **TaskBridge** store, install the app, open it.
-3. **Setup** (~1 min):
-   - **Todoist:** paste an API token (Todoist → Settings → Integrations → Developer).
-   - **Microsoft:** click Connect, open the link, enter the short code, sign in.
-     No Azure account or app registration needed — it uses Microsoft's public
-     "Graph Command Line Tools" client via the device-code flow.
-   - Pick a sync interval and hit **Start syncing**.
-
-## Run with plain Docker
+## Quick start (Docker)
 
 ```bash
 docker run -d --name taskbridge --restart unless-stopped \
@@ -44,7 +30,34 @@ docker run -d --name taskbridge --restart unless-stopped \
   ghcr.io/payam-ghavi/taskbridge:latest
 ```
 
-Open `http://localhost:3737` and complete setup.
+or with Compose:
+
+```yaml
+services:
+  taskbridge:
+    image: ghcr.io/payam-ghavi/taskbridge:latest
+    restart: unless-stopped
+    ports: ["3737:3737"]
+    volumes: ["./data:/data"]
+```
+
+Then open `http://localhost:3737` and do the **setup** (~1 min):
+
+1. **Todoist** — paste an API token (Todoist → Settings → Integrations → Developer).
+2. **Microsoft** — click Connect, open the link, type the short code, sign in.
+   No Azure account or app registration — it uses Microsoft's public
+   "Graph Command Line Tools" client via the device-code flow.
+3. Pick a sync interval and hit **Start syncing**.
+
+Images on `ghcr.io/payam-ghavi/taskbridge` and
+[`payamghavi/taskbridge`](https://hub.docker.com/r/payamghavi/taskbridge)
+(Docker Hub), both `linux/amd64` + `linux/arm64`.
+
+## Install on Umbrel
+
+App Store → **⋯** → **Community App Stores** → add
+`https://github.com/payam-ghavi/taskbridge`, then open the TaskBridge store and
+install. Same setup flow as above.
 
 ## How it works
 

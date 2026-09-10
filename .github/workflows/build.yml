@@ -13,6 +13,11 @@ permissions:
 jobs:
   docker:
     runs-on: ubuntu-latest
+    env:
+      # Set repo secret DOCKERHUB_TOKEN (a Docker Hub access token) to also
+      # publish to docker.io/payamghavi/taskbridge. Without it, GHCR only.
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_USER: payamghavi
     steps:
       - uses: actions/checkout@v4
 
@@ -25,10 +30,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_TOKEN != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USER }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/taskbridge
+          images: |
+            ghcr.io/${{ github.repository_owner }}/taskbridge
+            ${{ env.DOCKERHUB_TOKEN != '' && format('docker.io/{0}/taskbridge', env.DOCKERHUB_USER) || '' }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
