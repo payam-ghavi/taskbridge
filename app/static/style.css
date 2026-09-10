@@ -50,7 +50,7 @@ input:focus, select:focus { outline: 2px solid var(--accent-d); border-color: tr
 button, .btn {
   font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
   padding: 9px 16px; border-radius: 10px; border: 1px solid transparent;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: #fff; white-space: nowrap;
 }
 button.secondary, .btn.secondary { background: var(--card2); color: var(--text); border-color: var(--line); }
 button.ghost { background: transparent; color: var(--muted); border-color: var(--line); }
