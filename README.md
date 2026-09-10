@@ -50,7 +50,7 @@ Then open `http://localhost:3737` and do the **setup** (~1 min):
 3. Pick a sync interval and hit **Start syncing**.
 
 Images on `ghcr.io/payam-ghavi/taskbridge` and
-[`payamghavi/taskbridge`](https://hub.docker.com/r/payamghavi/taskbridge)
+[`payamg/taskbridge`](https://hub.docker.com/r/payamg/taskbridge)
 (Docker Hub), both `linux/amd64` + `linux/arm64`.
 
 ## Install on Umbrel

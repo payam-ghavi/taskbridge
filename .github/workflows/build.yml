@@ -15,9 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Set repo secret DOCKERHUB_TOKEN (a Docker Hub access token) to also
-      # publish to docker.io/payamghavi/taskbridge. Without it, GHCR only.
+      # publish to docker.io/payamg/taskbridge. Without it, GHCR only.
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_USER: payamghavi
+      DOCKERHUB_USER: payamg
     steps:
       - uses: actions/checkout@v4
 

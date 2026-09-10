@@ -2,7 +2,7 @@
 # For Umbrel, install from the App Store instead; see README.
 services:
   taskbridge:
-    image: ghcr.io/payam-ghavi/taskbridge:latest   # also: payamghavi/taskbridge:latest (Docker Hub)
+    image: ghcr.io/payam-ghavi/taskbridge:latest   # also: payamg/taskbridge:latest (Docker Hub)
     container_name: taskbridge
     restart: unless-stopped
     ports:
