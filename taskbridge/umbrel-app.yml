@@ -1,27 +1,28 @@
 manifestVersion: 1
 id: taskbridge
 name: TaskBridge
-tagline: Two-way sync between Microsoft To Do and Todoist
+tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "1.0.0"
+version: "2.0.0"
 port: 3737
 description: >-
-  TaskBridge keeps your tasks in sync — both directions — between Microsoft To Do
-  and Todoist. Add or check off a task in either app and it shows up in the other
-  within a minute.
+  TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
+  Google Tasks — connect any two, or all three. Add or check off a task in
+  one and it shows up in the others within a minute.
 
 
   What it syncs: task title, notes, due date, completion, and priority (as an
-  "important" flag). Lists and projects are matched by name; a missing one is
-  created on the other side. Completing a task in one app completes it in the
-  other; deleting deletes both.
+  "important" flag — Google Tasks has no priority field, so it just won't
+  carry one). Lists/projects are matched by name; a missing one is created on
+  connect. Completing or deleting a task does the same everywhere it's linked.
 
 
-  Setup takes about a minute: paste a Todoist API token, then sign in to
-  Microsoft by entering a short code — no Azure account or developer setup
-  needed. Everything runs on your Umbrel; the only outbound traffic is to
-  Microsoft and Todoist.
+  Setup: paste a Todoist API token, sign in to Microsoft by entering a short
+  code (no Azure account needed), and optionally connect Google Tasks (needs
+  a one-time free Google Cloud OAuth app of your own — the setup page walks
+  through it). Everything runs on your Umbrel; the only outbound traffic is
+  to the apps you connect.
 
 
   Not synced: time-of-day on due dates (only the date), sub-tasks / checklist
@@ -37,8 +38,9 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
-  First release. Two-way sync of title, notes, due date, completion and priority
-  between Microsoft To Do and Todoist, with a one-minute setup.
+  Google Tasks joins Microsoft To Do and Todoist as a third connector — sync
+  any two, or all three, together. Internals reworked to support any number
+  of connected apps, not just a fixed pair.
 dependencies: []
 path: ""
 defaultUsername: ""
