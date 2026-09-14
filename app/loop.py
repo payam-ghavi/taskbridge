@@ -13,9 +13,10 @@ from .todoist_client import TodoistClient
 log = logging.getLogger("taskbridge.loop")
 
 
-def _build_client(provider, creds, dry_run=False):
+def _build_client(provider, creds, store=None, dry_run=False):
     if provider == "todoist":
-        return TodoistClient(creds.get("token"), creds.get("sync_token"), dry_run=dry_run)
+        sync_token = store.get_cursor("todoist", "account") if store else None
+        return TodoistClient(creds.get("token"), sync_token, dry_run=dry_run)
     if provider == "mstodo":
         return GraphClient(creds.get("client_id"), creds.get("refresh_token"), dry_run=dry_run)
     if provider == "google":
@@ -73,7 +74,7 @@ class SyncLoop(threading.Thread):
             clients = {}
             for provider, conn in store.all_connections().items():
                 try:
-                    clients[provider] = _build_client(provider, conn["creds"])
+                    clients[provider] = _build_client(provider, conn["creds"], store)
                 except RuntimeError as e:
                     # token refresh rejected -> that provider needs reconnecting;
                     # keep syncing whatever other providers are still healthy.

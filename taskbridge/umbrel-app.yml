@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.2"
+version: "2.0.3"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -38,6 +38,14 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.3: fixes a bug where Todoist's sync cursor was never actually reused —
+  every cycle re-fetched Todoist's entire task list instead of just what
+  changed. With Todoist as the (default) conflict winner, that made it look
+  like Todoist had "also touched" every task group every cycle, silently
+  discarding real completions and edits made in Microsoft To Do or Google
+  Tasks. Fixed; no action needed after updating.
+
+
   2.0.2: fixes a bug where a provider connected after the other two already
   had a default list group (the common order: Todoist + Microsoft first,
   Google Tasks later) got its own default list ("My Tasks", "Inbox", etc.)

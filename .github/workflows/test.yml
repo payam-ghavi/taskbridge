@@ -16,3 +16,4 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python tests/test_engine.py
       - run: python tests/test_web.py
+      - run: python tests/test_loop.py
