@@ -117,6 +117,9 @@ def _gather_changes(store, provider, client):
     out = []
     if provider == "todoist":
         for tid, item in client.items.items():
+            d = item.get("due")
+            if d and len((d.get("date") or d.get("datetime") or "")) > 10:
+                store.log("info", f"DEBUG todoist raw {item.get('content')!r}: due={d!r}")
             out.append((item.get("project_id"), tid, item))
         return out
 

@@ -100,9 +100,15 @@ class TodoistClient:
 
 
 def _due_arg(c):
+    """due_time is always UTC (that's what Microsoft's reminderDateTime and
+    Google's due both give us) -- mark it explicitly with a trailing 'Z' so
+    Todoist converts it to the user's local time for display instead of
+    treating the bare digits as already being local wall-clock time."""
     if not c["due"]:
         return None
-    return {"date": f"{c['due']}T{c['due_time']}:00" if c.get("due_time") else c["due"]}
+    if c.get("due_time"):
+        return {"date": f"{c['due']}T{c['due_time']}:00Z"}
+    return {"date": c["due"]}
 
 
 def cmd_item_add(c, project_id, temp_id):

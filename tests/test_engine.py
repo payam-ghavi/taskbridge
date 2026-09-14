@@ -436,8 +436,8 @@ def run_ms_reminder_due_test():
 
     canon_with_time = C.canonical("Call vet", "", "2026-09-24", "10:00", False, False)
     cmds = cmd_item_add(canon_with_time, "proj1", "tmp1")
-    check("Y6: Todoist item_add carries the time in due.date",
-          cmds[0]["args"]["due"] == {"date": "2026-09-24T10:00:00"}, f"got {cmds[0]['args'].get('due')}")
+    check("Y6: Todoist item_add carries the time in due.date, marked UTC",
+          cmds[0]["args"]["due"] == {"date": "2026-09-24T10:00:00Z"}, f"got {cmds[0]['args'].get('due')}")
 
     ms_body = canonical_to_ms_patch(canon_with_time)
     check("Y7: MS patch sets both dueDateTime and reminderDateTime",
