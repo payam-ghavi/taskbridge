@@ -167,17 +167,29 @@ def device_code_poll(device_code, client_id=None):
 # ---- body builder -----------------------------------------------------------
 
 def canonical_to_ms_patch(new_c, prev_c=None):
+    """A due_time (set via another app's real due-time or reminder) is mirrored
+    onto MS's own "Remind me" field too -- dueDateTime alone has no time
+    picker in the To Do app, so a time-bearing due date would otherwise be
+    invisible there."""
     body = {}
     full = prev_c is None
     if full or new_c["title"] != prev_c["title"]:
         body["title"] = new_c["title"]
     if full or new_c["notes"] != prev_c["notes"]:
         body["body"] = {"content": new_c["notes"], "contentType": "text"}
-    if full or new_c["due"] != prev_c["due"]:
-        body["dueDateTime"] = (
-            {"dateTime": new_c["due"] + "T00:00:00", "timeZone": "UTC"}
-            if new_c["due"] else None
-        )
+    if full or new_c["due"] != prev_c["due"] or new_c.get("due_time") != prev_c.get("due_time"):
+        if new_c["due"]:
+            body["dueDateTime"] = {"dateTime": new_c["due"] + "T00:00:00", "timeZone": "UTC"}
+            if new_c.get("due_time"):
+                body["reminderDateTime"] = {
+                    "dateTime": f"{new_c['due']}T{new_c['due_time']}:00", "timeZone": "UTC",
+                }
+                body["isReminderOn"] = True
+            else:
+                body["isReminderOn"] = False
+        else:
+            body["dueDateTime"] = None
+            body["isReminderOn"] = False
     if full or new_c["important"] != prev_c["important"]:
         body["importance"] = "high" if new_c["important"] else "normal"
     if full or new_c["completed"] != prev_c["completed"]:

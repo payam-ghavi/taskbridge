@@ -99,12 +99,18 @@ class TodoistClient:
         return temp_map.get(temp)
 
 
+def _due_arg(c):
+    if not c["due"]:
+        return None
+    return {"date": f"{c['due']}T{c['due_time']}:00" if c.get("due_time") else c["due"]}
+
+
 def cmd_item_add(c, project_id, temp_id):
     args = {"content": c["title"], "project_id": project_id}
     if c["notes"]:
         args["description"] = c["notes"]
     if c["due"]:
-        args["due"] = {"date": c["due"]}
+        args["due"] = _due_arg(c)
     if c["important"]:
         args["priority"] = 4
     cmds = [{"type": "item_add", "temp_id": temp_id, "uuid": _uuid(), "args": args}]
@@ -120,8 +126,8 @@ def cmd_item_update(item_id, new_c, prev_c):
         args["content"] = new_c["title"]
     if new_c["notes"] != prev_c["notes"]:
         args["description"] = new_c["notes"]
-    if new_c["due"] != prev_c["due"]:
-        args["due"] = {"date": new_c["due"]} if new_c["due"] else None
+    if new_c["due"] != prev_c["due"] or new_c.get("due_time") != prev_c.get("due_time"):
+        args["due"] = _due_arg(new_c)
     if new_c["important"] != prev_c["important"]:
         args["priority"] = 4 if new_c["important"] else 1
     if len(args) > 1:

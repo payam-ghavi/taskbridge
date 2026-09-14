@@ -179,8 +179,12 @@ def canonical_to_google_body(new_c, prev_c=None):
         body["title"] = new_c["title"]
     if full or new_c["notes"] != prev_c["notes"]:
         body["notes"] = new_c["notes"]
-    if full or new_c["due"] != prev_c["due"]:
-        body["due"] = f"{new_c['due']}T00:00:00.000Z" if new_c["due"] else None
+    if full or new_c["due"] != prev_c["due"] or new_c.get("due_time") != prev_c.get("due_time"):
+        if new_c["due"]:
+            time_part = new_c["due_time"] if new_c.get("due_time") else "00:00"
+            body["due"] = f"{new_c['due']}T{time_part}:00.000Z"
+        else:
+            body["due"] = None
     if full or new_c["completed"] != prev_c["completed"]:
         if new_c["completed"]:
             body["status"] = "completed"

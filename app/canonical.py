@@ -31,17 +31,20 @@ def _norm_text(s):
 
 
 def _norm_due(s):
-    """Return 'YYYY-MM-DD' or None. Time-of-day is intentionally dropped."""
+    """Return 'YYYY-MM-DD' or None."""
     if not s:
         return None
     return str(s)[:10]
 
 
-def canonical(title, notes, due, important, completed):
+def canonical(title, notes, due, due_time, important, completed):
+    """``due_time`` is 'HH:MM' or None; only meaningful when ``due`` is set."""
+    due = _norm_due(due)
     return {
         "title": _norm_text(title),
         "notes": _norm_text(notes),
-        "due": _norm_due(due),
+        "due": due,
+        "due_time": due_time if due and due_time else None,
         "important": None if important is None else bool(important),
         "completed": bool(completed),
     }
@@ -54,9 +57,12 @@ def canon_hash(c):
 
 
 def relevant_diff(new_c, prev_c, provider):
-    """True if new_c differs from prev_c in a field `provider` can represent."""
+    """True if new_c differs from prev_c in a field `provider` can represent.
+    Uses prev_c.get() rather than prev_c[] so a canon dict stored before a new
+    field existed (schema evolution) compares as unchanged on that field
+    instead of raising."""
     unsupported = UNSUPPORTED.get(provider, set())
-    return any(new_c[k] != prev_c[k] for k in new_c if k not in unsupported)
+    return any(new_c[k] != prev_c.get(k) for k in new_c if k not in unsupported)
 
 
 def merge(prev_c, new_c, provider):
@@ -74,10 +80,14 @@ def merge(prev_c, new_c, provider):
 # ---- Todoist -----------------------------------------------------------
 
 def item_to_canonical(item):
-    due = None
+    due, due_time = None, None
     d = item.get("due")
     if d:
-        due = d.get("date") or d.get("datetime")
+        raw = d.get("date") or d.get("datetime")
+        if raw:
+            due = raw[:10]
+            if len(raw) > 10:
+                due_time = raw[11:16]
     priority = item.get("priority") or 1          # 1=none .. 4=urgent
     checked = item.get("checked")
     if checked is None:
@@ -86,6 +96,7 @@ def item_to_canonical(item):
         item.get("content"),
         item.get("description"),
         due,
+        due_time,
         int(priority) >= 3,                       # P1/P2 -> important
         bool(checked),
     )
@@ -94,15 +105,26 @@ def item_to_canonical(item):
 # ---- Microsoft To Do -----------------------------------------------------
 
 def task_to_canonical(t):
-    due = None
-    dd = t.get("dueDateTime")
-    if dd and dd.get("dateTime"):
-        due = dd["dateTime"][:10]
+    """Microsoft To Do's app exposes two separate date+time controls: "Add due
+    date" (dueDateTime — no time picker in the UI, so it never carries a real
+    time) and "Remind me" (reminderDateTime — has an actual time picker). When
+    both are set on the same task, the reminder is the one the user actually
+    picked a time for, so it wins over the plain due date."""
+    due, due_time = None, None
+    if t.get("isReminderOn"):
+        rd = t.get("reminderDateTime")
+        if rd and rd.get("dateTime"):
+            due, due_time = rd["dateTime"][:10], rd["dateTime"][11:16]
+    if due is None:
+        dd = t.get("dueDateTime")
+        if dd and dd.get("dateTime"):
+            due = dd["dateTime"][:10]
     notes = (t.get("body") or {}).get("content") or ""
     return canonical(
         t.get("title"),
         notes,
         due,
+        due_time,
         (t.get("importance") == "high"),
         (t.get("status") == "completed"),
     )
@@ -111,12 +133,21 @@ def task_to_canonical(t):
 # ---- Google Tasks --------------------------------------------------------
 
 def gtask_to_canonical(t):
-    """Google Tasks has no priority/importance field at all — always None."""
-    due = t.get("due")
+    """Google Tasks has no priority/importance field at all — always None.
+    Its ``due`` timestamp is midnight for a plain (no-time) due date, so a
+    time component of exactly 00:00 is treated as "no time set" rather than
+    a genuine midnight reminder."""
+    due, due_time = None, None
+    d = t.get("due")
+    if d:
+        due = d[:10]
+        if len(d) > 10 and d[11:16] != "00:00":
+            due_time = d[11:16]
     return canonical(
         t.get("title"),
         t.get("notes"),
-        due[:10] if due else None,
+        due,
+        due_time,
         None,
         (t.get("status") == "completed"),
     )

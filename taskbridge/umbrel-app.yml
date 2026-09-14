@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.3"
+version: "2.0.4"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -12,10 +12,11 @@ description: >-
   one and it shows up in the others within a minute.
 
 
-  What it syncs: task title, notes, due date, completion, and priority (as an
-  "important" flag — Google Tasks has no priority field, so it just won't
-  carry one). Lists/projects are matched by name; a missing one is created on
-  connect. Completing or deleting a task does the same everywhere it's linked.
+  What it syncs: task title, notes, due date and time, completion, and
+  priority (as an "important" flag — Google Tasks has no priority field, so
+  it just won't carry one). Lists/projects are matched by name; a missing one
+  is created on connect. Completing or deleting a task does the same
+  everywhere it's linked.
 
 
   Setup: paste a Todoist API token, sign in to Microsoft by entering a short
@@ -25,8 +26,8 @@ description: >-
   to the apps you connect.
 
 
-  Not synced: time-of-day on due dates (only the date), sub-tasks / checklist
-  items, and recurrence rules (a recurring task still syncs its next due date).
+  Not synced: sub-tasks / checklist items, and recurrence rules (a recurring
+  task still syncs its next due date).
 developer: Payam Ghavi
 website: https://github.com/payam-ghavi/taskbridge
 submitter: Payam Ghavi
@@ -38,6 +39,14 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.4: due date AND time now sync, not just the date. In Microsoft To Do
+  specifically, a time comes from "Remind me" (its only date control with a
+  real time picker) — it wins over a plain "Add due date" when both are set,
+  and gets mirrored back onto To Do's own reminder so it's visible there too.
+  Also fixes a bug where a Microsoft-sourced due date could fail to reach
+  Todoist/Google Tasks at all when it only had a reminder set, not a due date.
+
+
   2.0.3: fixes a bug where Todoist's sync cursor was never actually reused —
   every cycle re-fetched Todoist's entire task list instead of just what
   changed. With Todoist as the (default) conflict winner, that made it look

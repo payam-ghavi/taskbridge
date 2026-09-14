@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.store import Store
 from app.engine import Config, sync_once
-import app.canonical  # noqa: F401  (import check)
+from app import canonical as C
 
 _id_counter = itertools.count(1)
 
@@ -390,6 +390,72 @@ def run():
     os.remove(path)
 
 
+def run_ms_reminder_due_test():
+    """Regression: Microsoft To Do's app has two separate date+time controls
+    -- "Add due date" (dueDateTime, no time picker in the UI) and "Remind me"
+    (reminderDateTime, has an actual time picker). A task set up via "Remind
+    me" alone has no dueDateTime at all, so task_to_canonical must fall back
+    to reminderDateTime -- otherwise that task's date silently never reaches
+    Todoist or Google Tasks. When BOTH are set, the reminder wins (it's the
+    one with a real time the user actually picked)."""
+    due_only = {"title": "x", "body": {}, "status": "notStarted",
+                "dueDateTime": {"dateTime": "2026-09-24T00:00:00.0000000", "timeZone": "UTC"}}
+    c1 = C.task_to_canonical(due_only)
+    check("Y1: dueDateTime alone sets the date, with no time",
+          c1["due"] == "2026-09-24" and c1["due_time"] is None, f"got {c1}")
+
+    reminder_only = {"title": "x", "body": {}, "status": "notStarted",
+                      "isReminderOn": True,
+                      "reminderDateTime": {"dateTime": "2026-09-24T10:00:00.0000000", "timeZone": "UTC"}}
+    c2 = C.task_to_canonical(reminder_only)
+    check("Y2: reminderDateTime alone (no dueDateTime) sets both date and time",
+          c2["due"] == "2026-09-24" and c2["due_time"] == "10:00", f"got {c2}")
+
+    both = {"title": "x", "body": {}, "status": "notStarted",
+            "isReminderOn": True,
+            "dueDateTime": {"dateTime": "2026-09-20T00:00:00.0000000", "timeZone": "UTC"},
+            "reminderDateTime": {"dateTime": "2026-09-24T10:00:00.0000000", "timeZone": "UTC"}}
+    c3 = C.task_to_canonical(both)
+    check("Y3: when both are set, the reminder's date+time wins over the due date",
+          c3["due"] == "2026-09-24" and c3["due_time"] == "10:00", f"got {c3}")
+
+    stale_reminder = {"title": "x", "body": {}, "status": "notStarted",
+                       "isReminderOn": False,
+                       "reminderDateTime": {"dateTime": "2026-09-24T10:00:00.0000000", "timeZone": "UTC"}}
+    check("Y4: a stale reminderDateTime with isReminderOn=False is ignored",
+          C.task_to_canonical(stale_reminder)["due"] is None)
+
+    neither = {"title": "x", "body": {}, "status": "notStarted"}
+    check("Y5: no due date and no reminder -> due is None",
+          C.task_to_canonical(neither)["due"] is None)
+
+    # ---- round-trip: a due_time reaches every other provider's write body
+    from app.todoist_client import cmd_item_add, cmd_item_update
+    from app.graph_client import canonical_to_ms_patch
+    from app.google_client import canonical_to_google_body
+
+    canon_with_time = C.canonical("Call vet", "", "2026-09-24", "10:00", False, False)
+    cmds = cmd_item_add(canon_with_time, "proj1", "tmp1")
+    check("Y6: Todoist item_add carries the time in due.date",
+          cmds[0]["args"]["due"] == {"date": "2026-09-24T10:00:00"}, f"got {cmds[0]['args'].get('due')}")
+
+    ms_body = canonical_to_ms_patch(canon_with_time)
+    check("Y7: MS patch sets both dueDateTime and reminderDateTime",
+          ms_body["dueDateTime"]["dateTime"] == "2026-09-24T00:00:00"
+          and ms_body["reminderDateTime"]["dateTime"] == "2026-09-24T10:00:00"
+          and ms_body["isReminderOn"] is True, f"got {ms_body}")
+
+    g_body = canonical_to_google_body(canon_with_time)
+    check("Y8: Google body's due carries the time",
+          g_body["due"] == "2026-09-24T10:00:00.000Z", f"got {g_body}")
+
+    no_time_update = C.canonical("Call vet", "", "2026-09-24", None, False, False)
+    upd_cmds = cmd_item_update("item1", no_time_update, canon_with_time)
+    due_cmd = next(c for c in upd_cmds if c["type"] == "item_update")
+    check("Y9: dropping the time on update sends a bare date",
+          due_cmd["args"]["due"] == {"date": "2026-09-24"}, f"got {due_cmd['args'].get('due')}")
+
+
 def run_late_join_test():
     """Regression: connecting Google (or any provider) AFTER the others
     already have a default group must join that existing group, not spawn a
@@ -483,6 +549,8 @@ if __name__ == "__main__":
     run()
     print("\n=== late-join list reconciliation test ===")
     run_late_join_test()
+    print("\n=== MS reminder/due-time test ===")
+    run_ms_reminder_due_test()
     print("\n=== v1 -> v2 migration test ===")
     run_migration_test()
     print(f"\n{'ALL PASSED' if not FAILURES else f'{len(FAILURES)} FAILED: ' + ', '.join(FAILURES)}")
