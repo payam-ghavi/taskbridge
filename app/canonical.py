@@ -20,7 +20,13 @@ import re
 UNSUPPORTED = {
     "todoist": set(),
     "mstodo": set(),
-    "google": {"important"},
+    # Google's public Tasks API accepts a full RFC3339 due timestamp but
+    # silently discards the time-of-day, always echoing midnight back on
+    # read (a long-documented API limitation, unrelated to what Google's own
+    # apps can do with private endpoints). Without this, that midnight
+    # echo would look like a real edit and erase the time Todoist/Microsoft
+    # actually have for the task.
+    "google": {"important", "due_time"},
 }
 
 

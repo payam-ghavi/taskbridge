@@ -127,6 +127,12 @@ def _gather_changes(store, provider, client):
                 continue
             tasks, new_link = client.delta(list_id, store.get_cursor("mstodo", list_id))
             for t in tasks:
+                if not t.get("@removed"):
+                    store.log("info", f"DEBUG mstodo raw {t.get('title')!r}: "
+                              f"dueDateTime={t.get('dueDateTime')!r} "
+                              f"isReminderOn={t.get('isReminderOn')!r} "
+                              f"reminderDateTime={t.get('reminderDateTime')!r} "
+                              f"keys={sorted(t.keys())}")
                 out.append((list_id, t["id"], t))
             if new_link:
                 store.set_cursor("mstodo", list_id, new_link)
