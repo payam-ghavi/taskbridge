@@ -2,9 +2,9 @@
 {% block title %}TaskBridge{% endblock %}
 {% block content %}
 
-{% if ms_auth_expired %}
+{% if any_auth_expired %}
 <div class="banner warn">
-  Microsoft sign-in expired. <a href="{{ url_for('setup') }}">Reconnect</a> to resume syncing.
+  A sign-in expired. <a href="{{ url_for('setup') }}">Reconnect</a> to resume syncing.
 </div>
 {% elif last_error %}
 <div class="banner err">Last sync failed: {{ last_error }}</div>
@@ -31,16 +31,14 @@
 
 <div class="card">
   <h2>Accounts</h2>
+  {% for a in accounts %}
   <div class="row" style="margin-top:8px">
-    <span>🔵 Todoist</span><span class="spacer"></span>
-    <span class="pill ok">{{ todoist_name }}</span>
+    <span>{{ a.icon }} {{ a.label }}</span><span class="spacer"></span>
+    <span class="pill {{ 'err' if a.auth_expired else 'ok' }}">{{ a.name }}</span>
   </div>
-  <div class="row">
-    <span>🟣 Microsoft To Do</span><span class="spacer"></span>
-    <span class="pill {{ 'err' if ms_auth_expired else 'ok' }}">{{ ms_email }}</span>
-  </div>
+  {% endfor %}
   <div class="row" style="margin-top:12px">
-    <a class="btn secondary small" href="{{ url_for('setup') }}">Reconnect / change</a>
+    <a class="btn secondary small" href="{{ url_for('setup') }}">Reconnect / add an app</a>
   </div>
 </div>
 
@@ -58,10 +56,11 @@
           </select>
         </div>
         <div>
-          <label>Conflicts keep</label>
+          <label>If edited on two sides at once, keep</label>
           <select name="conflict_winner">
-            <option value="todoist" {{ 'selected' if settings.conflict_winner=='todoist' }}>Todoist</option>
-            <option value="mstodo"  {{ 'selected' if settings.conflict_winner=='mstodo' }}>To Do</option>
+            {% for a in accounts %}
+            <option value="{{ a.provider }}" {{ 'selected' if settings.conflict_winner==a.provider }}>{{ a.name }}'s version</option>
+            {% endfor %}
           </select>
         </div>
       </div>
@@ -112,7 +111,7 @@ async function refresh(){
     feed.innerHTML = (s.activity||[]).map(a =>
       `<li><span class="t">${fmt(a.ts)}</span><span class="lvl-${a.level}">${a.message.replace(/[<>&]/g,'')}</span></li>`
     ).join('') || '<li><span class="t"></span>Nothing yet.</li>';
-    if (s.ms_auth_expired || (s.last_error && !document.querySelector('.banner'))) location.reload();
+    if (s.any_auth_expired || (s.last_error && !document.querySelector('.banner'))) location.reload();
   } catch(e){}
 }
 setInterval(refresh, 5000);

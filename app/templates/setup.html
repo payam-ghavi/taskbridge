@@ -3,18 +3,22 @@
 {% block content %}
 
 <div class="card">
-  <h2>Connect your two apps</h2>
-  <p class="sub">TaskBridge keeps tasks in sync both ways between Microsoft&nbsp;To&nbsp;Do and Todoist. Nothing leaves this device except calls to Microsoft and Todoist.</p>
+  <h2>Connect your apps</h2>
+  <p class="sub">TaskBridge keeps tasks in sync across whichever of these you connect &mdash; two is enough, all three works too. Nothing leaves this device except calls to the apps themselves.</p>
+
+  {% if google_error %}
+  <div class="banner err">{{ google_error }}</div>
+  {% endif %}
 
   <!-- Step 1: Todoist -->
-  <div class="step {% if todoist_name %}done{% endif %}" id="step-td">
-    <div class="num">{% if todoist_name %}✓{% else %}1{% endif %}</div>
+  <div class="step {% if connections.todoist %}done{% endif %}" id="step-td">
+    <div class="num">{% if connections.todoist %}✓{% else %}1{% endif %}</div>
     <div class="body">
       <h3>Todoist</h3>
-      <div id="td-connected" class="msg ok" {% if not todoist_name %}hidden{% endif %}>
-        Connected as <b>{{ todoist_name }}</b> · <a href="#" onclick="tdReset(event)">change</a>
+      <div id="td-connected" class="msg ok" {% if not connections.todoist %}hidden{% endif %}>
+        {% if connections.todoist %}Connected as <b>{{ connections.todoist.display_name }}</b> · <a href="#" onclick="disconnect(event,'todoist')">change</a>{% endif %}
       </div>
-      <div id="td-form" {% if todoist_name %}hidden{% endif %}>
+      <div id="td-form" {% if connections.todoist %}hidden{% endif %}>
         <label>API token
           <span class="hint">Todoist → Settings → Integrations → Developer → API token</span>
         </label>
@@ -28,14 +32,14 @@
   </div>
 
   <!-- Step 2: Microsoft -->
-  <div class="step {% if ms_email %}done{% endif %}" id="step-ms" style="margin-top:6px">
-    <div class="num">{% if ms_email %}✓{% else %}2{% endif %}</div>
+  <div class="step {% if connections.mstodo %}done{% endif %}" id="step-ms" style="margin-top:6px">
+    <div class="num">{% if connections.mstodo %}✓{% else %}2{% endif %}</div>
     <div class="body">
-      <h3>Microsoft</h3>
-      <div id="ms-connected" class="msg ok" {% if not ms_email %}hidden{% endif %}>
-        Connected as <b>{{ ms_email }}</b> · <a href="#" onclick="msReset(event)">change</a>
+      <h3>Microsoft To Do</h3>
+      <div id="ms-connected" class="msg ok" {% if not connections.mstodo %}hidden{% endif %}>
+        {% if connections.mstodo %}Connected as <b>{{ connections.mstodo.display_name }}</b> · <a href="#" onclick="disconnect(event,'mstodo')">change</a>{% endif %}
       </div>
-      <div id="ms-start" {% if ms_email %}hidden{% endif %}>
+      <div id="ms-start" {% if connections.mstodo %}hidden{% endif %}>
         <button class="small" onclick="msConnect()">Connect Microsoft</button>
       </div>
       <div id="ms-pending" hidden>
@@ -49,9 +53,63 @@
     </div>
   </div>
 
-  <!-- Step 3: options -->
+  <!-- Step 3: Google Tasks -->
+  <div class="step {% if connections.google %}done{% endif %}" id="step-google" style="margin-top:6px">
+    <div class="num">{% if connections.google %}✓{% else %}3{% endif %}</div>
+    <div class="body">
+      <h3>Google Tasks <span class="hint">(optional)</span></h3>
+
+      {% if connections.google %}
+      <div class="msg ok">
+        Connected as <b>{{ connections.google.display_name }}</b> · <a href="#" onclick="disconnect(event,'google')">change</a>
+      </div>
+
+      {% elif google_client_id %}
+      <p class="hint">Google Cloud app saved. Sign in to finish connecting:</p>
+      <div class="row" style="margin-top:8px">
+        <a class="btn small" href="/connect/google/start">Connect Google Tasks</a>
+        <a href="#" class="hint" onclick="document.getElementById('g-form').hidden=false; return false;">use different credentials</a>
+      </div>
+
+      {% else %}
+      <p class="sub" style="margin:4px 0 10px">
+        Google doesn't offer a shared sign-in like Microsoft's — every self-hosted
+        instance needs its own free Google Cloud OAuth app (same pattern Nextcloud,
+        Immich, etc. use). About 10 minutes, one time.
+        <a href="#" onclick="document.getElementById('g-steps').hidden=!document.getElementById('g-steps').hidden; return false;">Show the steps</a>
+      </p>
+      <ol id="g-steps" class="steps-list" hidden>
+        <li>Go to <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">console.cloud.google.com</a> and create a project (any name).</li>
+        <li><b>APIs &amp; Services → Library</b> → search <b>Google Tasks API</b> → Enable.</li>
+        <li><b>Google Auth Platform</b> (left sidebar) → <b>Get started</b> → App name "TaskBridge" + your email as support email → Audience <b>External</b> → add your own Google account under <b>test users</b> → your email again for contact → agree &amp; create.</li>
+        <li><b>Data Access</b> (left sidebar) → <b>Add or remove scopes</b> → filter for "tasks" → check <code>.../auth/tasks</code> ("Create, edit, organize, and delete all your tasks") → Update → <b>Save</b>.
+          <br><b>Don't skip this</b> — without it, signing in still appears to work but every actual sync call fails with a 403.</li>
+        <li><b>Clients</b> (left sidebar) → <b>Create client</b> → Application type <b>Web application</b>.</li>
+        <li>Under <b>Authorized redirect URIs</b>, add exactly:
+          <div class="code" style="font-size:14px; padding:8px 10px; text-align:left; word-break:break-all">{{ google_redirect_uri }}</div>
+          Google requires this to be <code>http://localhost:&lt;port&gt;/…</code> or a real domain with a public suffix (e.g. <code>.com</code>, <code>.org</code>) — a bare LAN IP like <code>http://192.168.1.50:3737/…</code> is rejected. If that's how you reach TaskBridge (most home servers), point a free
+          <a href="https://www.duckdns.org" target="_blank" rel="noopener">DuckDNS</a> hostname at that IP and use
+          <code>http://yourname.duckdns.org:3737/oauth/google/callback</code> instead — DNS-only, no port-forwarding needed. Already on Tailscale? Its MagicDNS name works too.</li>
+        <li>Create it, then copy the <b>Client ID</b> and <b>Client secret</b> into the form below.</li>
+      </ol>
+      {% endif %}
+
+      <div id="g-form" {% if connections.google or google_client_id %}hidden{% endif %} style="margin-top:10px">
+        <label>Client ID</label>
+        <input type="text" id="g-client-id" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" value="{{ google_client_id or '' }}">
+        <label>Client secret</label>
+        <input type="password" id="g-client-secret" placeholder="GOCSPX-…" autocomplete="off">
+        <div class="row" style="margin-top:10px">
+          <button class="small" onclick="gSaveCreds()">Save &amp; continue</button>
+          <span id="g-msg" class="msg"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4: options -->
   <div class="step" id="step-opt" style="margin-top:6px">
-    <div class="num">3</div>
+    <div class="num">4</div>
     <div class="body">
       <h3>Options</h3>
       <form method="post" action="{{ url_for('save_settings') }}">
@@ -65,18 +123,19 @@
             </select>
           </div>
           <div>
-            <label>If edited on both sides, keep</label>
+            <label>If edited on two sides at once, keep</label>
             <select name="conflict_winner">
-              <option value="todoist" {{ 'selected' if settings.conflict_winner=='todoist' }}>Todoist's version</option>
-              <option value="mstodo" {{ 'selected' if settings.conflict_winner=='mstodo' }}>To Do's version</option>
+              {% for provider, conn in connections.items() %}
+              <option value="{{ provider }}" {{ 'selected' if settings.conflict_winner==provider }}>{{ conn.display_name or labels[provider] }}'s version</option>
+              {% endfor %}
             </select>
           </div>
         </div>
         <div class="row" style="margin-top:16px">
-          <button id="finish" type="submit" {% if not (todoist_name and ms_email) %}disabled{% endif %}>
+          <button id="finish" type="submit" {% if connections|length < 2 %}disabled{% endif %}>
             Start syncing
           </button>
-          <span class="hint">Lists and projects are matched by name; missing ones are created on the other side.</span>
+          <span class="hint">Connect at least two apps. Lists/projects are matched by name; missing ones are created on the other side(s).</span>
         </div>
       </form>
     </div>
@@ -84,7 +143,7 @@
 </div>
 
 <p class="hint" style="text-align:center">
-  Synced: title, notes, due date, completion, priority (as an “important” flag).
+  Synced: title, notes, due date, completion, priority (as an “important” flag — Google Tasks has no priority field, so it just won't carry one).
   Not synced: time-of-day on due dates, sub-tasks, recurrence rules.
 </p>
 {% endblock %}
@@ -102,6 +161,12 @@ async function post(url, body) {
   return r.json();
 }
 
+function disconnect(e, which){
+  e.preventDefault();
+  const f = new FormData(); f.append('which', which);
+  fetch('/disconnect', {method:'POST', body:f}).then(()=>location.reload());
+}
+
 /* ---- Todoist ---- */
 async function tdConnect() {
   const token = $('#td-token').value.trim();
@@ -112,8 +177,6 @@ async function tdConnect() {
   if (res.ok) location.reload();
   else { msg.textContent = res.error || 'Failed.'; msg.className = 'msg err'; }
 }
-function tdReset(e){ e.preventDefault(); const f=new FormData(); f.append('which','todoist');
-  fetch('/disconnect',{method:'POST',body:f}).then(()=>location.reload()); }
 
 /* ---- Microsoft device code ---- */
 let msTimer = null;
@@ -136,7 +199,17 @@ async function msConnect() {
   };
   msTimer = setTimeout(poll, (res.interval || 5) * 1000);
 }
-function msReset(e){ e.preventDefault(); const f=new FormData(); f.append('which','microsoft');
-  fetch('/disconnect',{method:'POST',body:f}).then(()=>location.reload()); }
+
+/* ---- Google Tasks ---- */
+async function gSaveCreds() {
+  const client_id = $('#g-client-id').value.trim();
+  const client_secret = $('#g-client-secret').value.trim();
+  const msg = $('#g-msg');
+  if (!client_id || !client_secret) { msg.textContent = 'Paste both fields.'; msg.className = 'msg err'; return; }
+  msg.textContent = 'Saving…'; msg.className = 'msg';
+  const res = await post('/connect/google/credentials', {client_id, client_secret});
+  if (res.ok) location.reload();
+  else { msg.textContent = res.error || 'Failed.'; msg.className = 'msg err'; }
+}
 </script>
 {% endblock %}

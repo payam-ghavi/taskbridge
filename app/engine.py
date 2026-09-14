@@ -1,261 +1,285 @@
 """The reconciliation engine — one pass = one `sync_once()` call.
 
-Echo suppression: after writing a task we store the exact canonical we wrote in
-`task_map.canon`. Next run the same task comes back in the other side's feed; its
-canonical equals the stored one, so we skip it. A real edit changes the canonical
-and is propagated.
+Generalized to any 2+ connected providers (Todoist, Microsoft To Do, Google
+Tasks): a task can be linked across all of them at once, not just a fixed
+pair. Everything routes through ``task_groups``/``task_links`` and
+``list_groups``/``list_group_members`` (see store.py) instead of the old
+Todoist<->To Do-specific columns.
 
-An unmapped task that is already completed is skipped entirely — the engine never
-resurrects completed history, only propagates completions of already-linked tasks.
+Echo suppression: after writing a task we store the exact canonical we wrote
+in the task group. Next run the same task comes back in that provider's own
+feed; its canonical equals the stored one (on every field that provider can
+represent — see canonical.UNSUPPORTED), so we skip it. A real edit changes the
+canonical and is propagated to every OTHER linked provider.
 
-Conflict (same mapping changed on both sides in one run): `cfg.conflict_winner`
-decides — default "todoist".
+An unmapped task that is already completed is never used to newly link/create
+on a provider that never had it — the engine doesn't resurrect completed
+history, only propagates completions of already-linked tasks.
+
+Conflict (the same task group changed by two providers in one cycle):
+``cfg.conflict_winner`` (a provider name) decides — default "todoist". A
+non-winning provider's change is dropped when the winner also touched the same
+group this cycle; two non-winners touching the same group is last-one-wins
+(logged), which is rare and self-heals next cycle either way.
+
+Todoist keeps its command-batching model (queue writes, apply once); Microsoft
+To Do and Google Tasks write immediately over REST — see providers.py.
 """
-import dataclasses
-import json
 import logging
-import uuid
 
-from .canonical import item_to_canonical, task_to_canonical
-from .graph_client import NotFound, canonical_to_ms_patch
-from .todoist_client import cmd_item_add, cmd_item_delete, cmd_item_update
+from . import canonical as C
+from . import providers
 
 log = logging.getLogger("taskbridge.engine")
 
 
-@dataclasses.dataclass
 class Config:
-    conflict_winner: str = "todoist"        # "todoist" | "mstodo"
-    match_existing: bool = True
-    dry_run: bool = False
+    def __init__(self, conflict_winner="todoist", match_existing=True, dry_run=False):
+        self.conflict_winner = conflict_winner
+        self.match_existing = match_existing
+        self.dry_run = dry_run
 
 
 def _norm(s):
     return (s or "").strip().lower()
 
 
-def reconcile_lists(store, td, ms):
-    ms_lists = ms.get_lists()
-    ms_by_norm = {_norm(l["displayName"]): l for l in ms_lists}
-    ms_default = next((l for l in ms_lists if l.get("wellknownListName") == "defaultList"), None)
+_DEFAULT_KEY = "\x00default"
 
-    projects = [p for p in store.all_projects()]
-    paired_projects = {p["todoist_project_id"] for p in store.all_pairs()}
-    paired_lists = {p["mstodo_list_id"] for p in store.all_pairs()}
 
-    for p in projects:
-        if p["id"] in paired_projects:
-            continue
-        target = ms_default if (p["is_inbox"] and ms_default) else ms_by_norm.get(_norm(p["name"]))
-        if target is None:
-            target = ms.create_list(p["name"])
-            if not target:
-                log.info("would create To Do list %r", p["name"])
+def _identity_key(list_obj):
+    return _DEFAULT_KEY if list_obj["is_default"] else _norm(list_obj["name"])
+
+
+def reconcile_lists(store, clients):
+    """Match each connected provider's lists to the others by name (default /
+    inbox lists always unify, regardless of what each provider calls them),
+    then create the missing side on every provider that doesn't have one yet."""
+    provider_lists = {p: providers.get_lists(p, c) for p, c in clients.items()}
+    already_grouped = {(p, lid) for g in store.all_list_groups() for p, lid in g["members"].items()}
+    group_id_by_key = {_norm(g["name"]): g["id"] for g in store.all_list_groups()}
+
+    pending = {}
+    for provider, lists in provider_lists.items():
+        for l in lists:
+            if (provider, l["id"]) in already_grouped:
                 continue
-            ms_by_norm[_norm(p["name"])] = target
-        store.add_pair(p["id"], target["id"], p["name"])
-        paired_projects.add(p["id"])
-        paired_lists.add(target["id"])
+            pending.setdefault(_identity_key(l), {})[provider] = l
 
-    proj_by_norm = {_norm(p["name"]): p for p in projects}
-    inbox = next((p for p in projects if p["is_inbox"]), None)
-    for l in ms_lists:
-        if l["id"] in paired_lists:
+    for key, by_provider in pending.items():
+        group_id = group_id_by_key.get(key)
+        if group_id is None:
+            display_name = next(iter(by_provider.values()))["name"]
+            group_id = store.add_list_group(display_name)
+            group_id_by_key[key] = group_id
+        for provider, l in by_provider.items():
+            store.add_list_group_member(group_id, provider, l["id"])
+
+    for g in store.all_list_groups():
+        members = g["members"]
+        for provider, client in clients.items():
+            if provider in members:
+                continue
+            new_id = providers.create_list(provider, client, g["name"])
+            if not new_id:
+                continue    # dry-run, or the client already logged a failure
+            store.add_list_group_member(g["id"], provider, new_id)
+            members[provider] = new_id
+
+
+def _is_removed(provider, raw_item):
+    if provider == "todoist":
+        return bool(raw_item.get("is_deleted"))
+    if provider == "mstodo":
+        return bool(raw_item.get("@removed"))
+    return False
+
+
+def _gather_changes(store, provider, client):
+    """-> [(list_id, item_id, raw_item_or_None)] ; None raw_item = removed."""
+    out = []
+    if provider == "todoist":
+        for tid, item in client.items.items():
+            out.append((item.get("project_id"), tid, item))
+        return out
+
+    if provider == "mstodo":
+        for g in store.all_list_groups():
+            list_id = g["members"].get("mstodo")
+            if not list_id:
+                continue
+            tasks, new_link = client.delta(list_id, store.get_cursor("mstodo", list_id))
+            for t in tasks:
+                out.append((list_id, t["id"], t))
+            if new_link:
+                store.set_cursor("mstodo", list_id, new_link)
+        return out
+
+    if provider == "google":
+        # No delta/removed feed — full-fetch each list and diff against what
+        # we already have linked to notice deletions ourselves.
+        for g in store.all_list_groups():
+            list_id = g["members"].get("google")
+            if not list_id:
+                continue
+            items = client.list_tasks(list_id)
+            current_ids = {t["id"] for t in items}
+            known_ids = store.mapped_item_ids("google", list_id=list_id)
+            for removed_id in known_ids - current_ids:
+                out.append((list_id, removed_id, None))
+            for t in items:
+                out.append((list_id, t["id"], t))
+        return out
+
+    raise ValueError(provider)
+
+
+def _handle_removed_item(store, clients, queue, provider, item_id):
+    group = store.task_group_for(provider, item_id)
+    if not group:
+        return
+    for other_provider, link in group["links"].items():
+        if other_provider == provider or other_provider not in clients:
             continue
-        if l.get("wellknownListName") == "defaultList" and inbox:
-            store.add_pair(inbox["id"], l["id"], l["displayName"])
-            continue
-        match = proj_by_norm.get(_norm(l["displayName"]))
-        if match:
-            store.add_pair(match["id"], l["id"], l["displayName"])
-            continue
-        new_pid = td.add_project(l["displayName"])
-        if not new_pid:
-            log.info("would create Todoist project %r", l["displayName"])
-            continue
-        store.upsert_project(new_pid, l["displayName"])
-        store.add_pair(new_pid, l["id"], l["displayName"])
-
-
-def _find_ms_match(ms, list_id, c):
-    for t in ms.list_tasks(list_id):
-        tc = task_to_canonical(t)
-        if not tc["completed"] and tc["title"] == c["title"] and tc["due"] == c["due"]:
-            return t
-    return None
-
-
-def _find_todoist_match(td, project_id, c, mapped_todoist_ids):
-    for tid, item in td.items.items():
-        if tid in mapped_todoist_ids or item.get("is_deleted") or item.get("parent_id"):
-            continue
-        if item.get("project_id") != project_id:
-            continue
-        ic = item_to_canonical(item)
-        if not ic["completed"] and ic["title"] == c["title"] and ic["due"] == c["due"]:
-            return tid
-    return None
-
-
-def _handle_todoist_item(store, ms, item, by_td, changed_ms_ids, cfg):
-    tid = item["id"]
-    row = by_td.get(tid)
-
-    if item.get("is_deleted"):
-        if row:
-            ms.delete_task(row["mstodo_list_id"], row["mstodo_id"])
-            store.delete_mapping(todoist_id=tid)
-        return
-
-    if item.get("parent_id"):
-        return
-
-    pair = store.pair_for_project(item.get("project_id"))
-    if not pair:
-        return
-
-    c = item_to_canonical(item)
-
-    if row:
-        prev_c = json.loads(row["canon"])
-        if c == prev_c:
-            return
-        if row["mstodo_id"] in changed_ms_ids and cfg.conflict_winner == "mstodo":
-            return
-        if row["mstodo_list_id"] != pair["mstodo_list_id"]:
-            ms.delete_task(row["mstodo_list_id"], row["mstodo_id"])
-            created = ms.create_task(pair["mstodo_list_id"], canonical_to_ms_patch(c))
-            store.delete_mapping(todoist_id=tid)
-            store.add_mapping(tid, created["id"], item["project_id"], pair["mstodo_list_id"], c)
-            return
-        ms.update_task(row["mstodo_list_id"], row["mstodo_id"], canonical_to_ms_patch(c, prev_c))
-        store.update_canon(tid, c)
-        return
-
-    mstodo_id = None
-    if cfg.match_existing:
-        m = _find_ms_match(ms, pair["mstodo_list_id"], c)
-        if m:
-            mstodo_id = m["id"]
-            m_c = task_to_canonical(m)
-            if m_c != c:
-                ms.update_task(pair["mstodo_list_id"], mstodo_id, canonical_to_ms_patch(c, m_c))
-    if not mstodo_id:
-        if c["completed"]:
-            return
-        created = ms.create_task(pair["mstodo_list_id"], canonical_to_ms_patch(c))
-        mstodo_id = created["id"]
-    store.add_mapping(tid, mstodo_id, item["project_id"], pair["mstodo_list_id"], c)
-
-
-def _handle_ms_task(store, td, t, list_id, by_ms, changed_td_ids, queue, pending, cfg):
-    mid = t["id"]
-    row = by_ms.get(mid)
-
-    if t.get("@removed"):
-        if row:
-            queue.append(cmd_item_delete(row["todoist_id"]))
-            store.delete_mapping(mstodo_id=mid)
-        return
-
-    c = task_to_canonical(t)
-    pair = store.pair_for_list(list_id)
-
-    if row:
-        prev_c = json.loads(row["canon"])
-        if c == prev_c:
-            return
-        if row["todoist_id"] in changed_td_ids and cfg.conflict_winner == "todoist":
-            return
-        cmds = cmd_item_update(row["todoist_id"], c, prev_c)
-        if cmds:
-            queue.extend(cmds)
-            store.update_canon(row["todoist_id"], c)
-        return
-
-    if not pair:
-        return
-
-    existing_tid = None
-    if cfg.match_existing:
-        existing_tid = _find_todoist_match(
-            td, pair["todoist_project_id"], c,
-            {r["todoist_id"] for r in store.by_todoist().values()},
-        )
-    if existing_tid:
-        store.add_mapping(existing_tid, mid, pair["todoist_project_id"], list_id, c)
-        return
-
-    if c["completed"]:
-        return
-
-    temp = str(uuid.uuid4())
-    queue.extend(cmd_item_add(c, pair["todoist_project_id"], temp))
-    pending.append({
-        "temp_id": temp, "mstodo_id": mid, "list_id": list_id,
-        "project_id": pair["todoist_project_id"], "canon": c,
-    })
-
-
-def sync_once(store, td, ms, cfg):
-    td.read()
-    for pid, pr in td.projects.items():
-        if pr.get("is_deleted") or pr.get("is_archived"):
-            store.delete_project(pid)
-        else:
-            store.upsert_project(
-                pid, pr.get("name", ""),
-                bool(pr.get("inbox_project") or pr.get("is_inbox_project")),
-            )
-    store.commit()
-
-    reconcile_lists(store, td, ms)
-    store.commit()
-
-    ms_changes = []
-    for pair in store.all_pairs():
-        lid = pair["mstodo_list_id"]
-        tasks, new_link = ms.delta(lid, store.get(f"delta:{lid}"))
-        for t in tasks:
-            ms_changes.append((lid, t))
-        if new_link:
-            store.set(f"delta:{lid}", new_link)
-    store.commit()
-
-    changed_td_ids = set(td.items.keys())
-    changed_ms_ids = {t["id"] for _, t in ms_changes if not t.get("@removed")}
-
-    by_td = store.by_todoist()
-    for tid, item in list(td.items.items()):
         try:
-            _handle_todoist_item(store, ms, item, by_td, changed_ms_ids, cfg)
-            store.commit()
-        except NotFound:
-            store.delete_mapping(todoist_id=tid)
-            store.commit()
-        except Exception:
-            log.exception("Todoist item %s failed", tid)
+            providers.delete(other_provider, clients[other_provider], queue,
+                              link["list_id"], link["item_id"])
+        except providers.NotFoundErrors:
+            pass
+    store.delete_task_group(group["id"])
+
+
+def _handle_existing_item(store, clients, queue, group, provider, canon, changed_ids, cfg):
+    prev = group["canon"]
+    if not C.relevant_diff(canon, prev, provider):
+        return
+
+    for other_provider, link in group["links"].items():
+        if other_provider == provider:
+            continue
+        if link["item_id"] in changed_ids.get(other_provider, ()) and cfg.conflict_winner == other_provider:
+            return   # back off — the configured winner also touched this group this cycle
+
+    new_canon = C.merge(prev, canon, provider)
+    if new_canon == prev:
+        return
+    store.update_task_group_canon(group["id"], new_canon)
+    for other_provider, link in group["links"].items():
+        if other_provider == provider or other_provider not in clients:
+            continue
+        providers.update(other_provider, clients.get(other_provider), queue,
+                          link["list_id"], link["item_id"], new_canon, prev)
+
+
+def _handle_new_item(store, clients, queue, pending, provider, list_id, item_id, canon, cfg):
+    lg = store.list_group_for(provider, list_id)
+    if not lg:
+        return   # list not paired yet; reconcile_lists will catch it next cycle
+
+    links = {provider: (item_id, list_id)}          # provider -> (item_id, list_id)
+    merged_canon = dict(canon)
+
+    if cfg.match_existing:
+        for other_provider, other_list_id in lg["members"].items():
+            if other_provider == provider or other_provider not in clients:
+                continue
+            mapped_ids = store.mapped_item_ids(other_provider)
+            match = providers.find_unmapped_match(
+                other_provider, clients[other_provider], other_list_id, canon, mapped_ids)
+            if match:
+                other_id, other_raw = match
+                links[other_provider] = (other_id, other_list_id)
+                merged_canon = C.merge(merged_canon, providers.to_canonical(other_provider, other_raw),
+                                        other_provider)
+
+    if canon["completed"] and len(links) < len(lg["members"]):
+        # Don't resurrect completed history onto a provider that never had this
+        # task — but if we matched it elsewhere, keep the link(s) we found.
+        if len(links) >= 2:
+            store.create_task_group(merged_canon, links)
+        return
+
+    temp_id, todoist_list_id = None, None
+    for other_provider, other_list_id in lg["members"].items():
+        if other_provider in links:
+            continue
+        if other_provider == "todoist":
+            _, temp_id = providers.queue_or_apply("todoist", None, queue, other_list_id, merged_canon)
+            todoist_list_id = other_list_id
+            continue
+        if other_provider not in clients:
+            continue
+        new_id, _ = providers.queue_or_apply(other_provider, clients[other_provider], queue,
+                                              other_list_id, merged_canon)
+        links[other_provider] = (new_id, other_list_id)
+
+    if temp_id:
+        pending.append({"temp_id": temp_id, "todoist_list_id": todoist_list_id,
+                         "immediate_links": links, "canon": merged_canon})
+    elif len(links) >= 2:
+        store.create_task_group(merged_canon, links)
+
+
+def _handle_change(store, clients, queue, pending, provider, list_id, item_id, raw_item, changed_ids, cfg):
+    if provider == "todoist" and raw_item is not None and raw_item.get("parent_id"):
+        return   # sub-tasks are out of scope
+    if raw_item is None or _is_removed(provider, raw_item):
+        _handle_removed_item(store, clients, queue, provider, item_id)
+        return
+
+    canon = providers.to_canonical(provider, raw_item)
+    group = store.task_group_for(provider, item_id)
+    if group:
+        _handle_existing_item(store, clients, queue, group, provider, canon, changed_ids, cfg)
+    else:
+        _handle_new_item(store, clients, queue, pending, provider, list_id, item_id, canon, cfg)
+
+
+def sync_once(store, clients, cfg):
+    """clients: {provider_name: client_instance} for every connected provider."""
+    if "todoist" in clients:
+        clients["todoist"].read()
+
+    reconcile_lists(store, clients)
+    store.commit()
+
+    raw_changes = {p: _gather_changes(store, p, c) for p, c in clients.items()}
+    store.commit()   # _gather_changes persists mstodo delta cursors as it goes
+    changed_ids = {p: {iid for _, iid, _ in items} for p, items in raw_changes.items()}
 
     queue, pending = [], []
-    by_ms = store.by_mstodo()
-    for lid, t in ms_changes:
-        try:
-            _handle_ms_task(store, td, t, lid, by_ms, changed_td_ids, queue, pending, cfg)
-        except Exception:
-            log.exception("To Do task %s failed", t.get("id"))
-    store.commit()
+    for provider, items in raw_changes.items():
+        for list_id, item_id, raw_item in items:
+            try:
+                _handle_change(store, clients, queue, pending, provider, list_id, item_id,
+                                raw_item, changed_ids, cfg)
+                store.commit()
+            except providers.NotFoundErrors:
+                store.remove_task_link(provider, item_id)
+                store.commit()
+            except Exception:
+                log.exception("%s item %s failed", provider, item_id)
 
-    if queue:
-        temp_map, _ = td.apply(queue)
+    if "todoist" in clients and queue:
+        temp_map, _ = clients["todoist"].apply(queue)
         for p in pending:
-            real = temp_map.get(p["temp_id"])
-            if real:
-                store.add_mapping(real, p["mstodo_id"], p["project_id"], p["list_id"], p["canon"])
-            elif not cfg.dry_run:
-                log.warning("no id returned for new Todoist task (mstodo %s)", p["mstodo_id"])
+            links = dict(p["immediate_links"])
+            if p["temp_id"]:
+                real = temp_map.get(p["temp_id"])
+                if real:
+                    links["todoist"] = (real, p["todoist_list_id"])
+                elif not cfg.dry_run:
+                    log.warning("no id returned for new Todoist task %r", p["canon"]["title"])
+            if len(links) >= 2:
+                store.create_task_group(p["canon"], links)
         store.commit()
 
-    store.set("todoist_sync_token", td.sync_token)
-    store.set("ms_refresh_token", ms.refresh_token)
+    if "todoist" in clients:
+        store.set_cursor("todoist", "account", clients["todoist"].sync_token)
+    for provider in ("mstodo", "google"):
+        if provider in clients:
+            conn = store.get_connection(provider)
+            store.update_creds(provider, {**conn["creds"], "refresh_token": clients[provider].refresh_token})
     store.commit()
-    return {"todoist_changes": len(changed_td_ids), "mstodo_changes": len(ms_changes)}
+
+    return {p: len(ids) for p, ids in changed_ids.items()}
