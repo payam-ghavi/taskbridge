@@ -117,9 +117,6 @@ def _gather_changes(store, provider, client):
     out = []
     if provider == "todoist":
         for tid, item in client.items.items():
-            d = item.get("due")
-            if d and len((d.get("date") or d.get("datetime") or "")) > 10:
-                store.log("info", f"DEBUG todoist raw {item.get('content')!r}: due={d!r}")
             out.append((item.get("project_id"), tid, item))
         return out
 
@@ -130,12 +127,6 @@ def _gather_changes(store, provider, client):
                 continue
             tasks, new_link = client.delta(list_id, store.get_cursor("mstodo", list_id))
             for t in tasks:
-                if not t.get("@removed"):
-                    store.log("info", f"DEBUG mstodo raw {t.get('title')!r}: "
-                              f"dueDateTime={t.get('dueDateTime')!r} "
-                              f"isReminderOn={t.get('isReminderOn')!r} "
-                              f"reminderDateTime={t.get('reminderDateTime')!r} "
-                              f"keys={sorted(t.keys())}")
                 out.append((list_id, t["id"], t))
             if new_link:
                 store.set_cursor("mstodo", list_id, new_link)

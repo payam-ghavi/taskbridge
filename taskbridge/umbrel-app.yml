@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.6"
+version: "2.0.7"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -39,6 +39,10 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.7: removes the temporary diagnostic logging added in 2.0.5/2.0.6 while
+  chasing the timezone bug below — no functional change.
+
+
   2.0.6: fixes a timezone bug from 2.0.4's due-time sync — a time coming from
   Microsoft's "Remind me" (always reported in UTC) was being written to
   Todoist as if it were already local time, so e.g. 11:00 AM showed up as
