@@ -5,6 +5,10 @@ services:
     environment:
       APP_HOST: taskbridge_web_1
       APP_PORT: 3737
+      # Google's OAuth redirect lands here from Google's own server, not a
+      # logged-in browser session -- it must reach TaskBridge directly rather
+      # than bounce through Umbrel's login wall.
+      PROXY_AUTH_WHITELIST: "/oauth/*"
 
   web:
     image: ghcr.io/payam-ghavi/taskbridge:1.0.0
