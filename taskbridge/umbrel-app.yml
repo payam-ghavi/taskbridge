@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.0"
+version: "2.0.1"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -38,9 +38,14 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
-  Google Tasks joins Microsoft To Do and Todoist as a third connector — sync
-  any two, or all three, together. Internals reworked to support any number
-  of connected apps, not just a fixed pair.
+  2.0.1: fixes Google sign-in behind a reverse proxy (Umbrel's app_proxy
+  included) — TaskBridge's own address is now set explicitly instead of
+  auto-detected, which the proxy was silently getting wrong.
+
+
+  2.0.0: Google Tasks joins Microsoft To Do and Todoist as a third connector
+  — sync any two, or all three, together. Internals reworked to support any
+  number of connected apps, not just a fixed pair.
 dependencies: []
 path: ""
 defaultUsername: ""

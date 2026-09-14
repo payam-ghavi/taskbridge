@@ -40,8 +40,14 @@ def _ago(ts):
     return f"{int(delta // 86400)} d ago"
 
 
-def _google_redirect_uri():
-    return request.host_url.rstrip("/") + url_for("google_callback")
+def _google_redirect_uri(s):
+    """Built from an explicit, user-set base URL rather than the incoming
+    request's Host header — behind a reverse proxy (Umbrel's app_proxy, most
+    self-hosted setups) that header is often rewritten to the internal
+    container address, silently producing a redirect_uri Google never sees
+    registered."""
+    base = s.get("cfg:google_base_url") or request.host_url.rstrip("/")
+    return base.rstrip("/") + url_for("google_callback")
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +76,8 @@ def setup():
             settings=s.all_cfg(),
             google_client_id=s.get("cfg:google_client_id"),
             google_client_secret_set=bool(s.get("cfg:google_client_secret")),
-            google_redirect_uri=_google_redirect_uri(),
+            google_redirect_uri=_google_redirect_uri(s),
+            google_base_url=s.get("cfg:google_base_url"),
         )
 
 
@@ -169,11 +176,13 @@ def google_credentials():
     data = request.get_json(silent=True) or request.form
     client_id = (data.get("client_id") or "").strip()
     client_secret = (data.get("client_secret") or "").strip()
-    if not client_id or not client_secret:
-        return jsonify(ok=False, error="Paste both the Client ID and Client Secret."), 400
+    base_url = (data.get("base_url") or "").strip().rstrip("/")
+    if not client_id or not client_secret or not base_url:
+        return jsonify(ok=False, error="Fill in all three fields."), 400
     with _store() as s:
         s.set("cfg:google_client_id", client_id)
         s.set("cfg:google_client_secret", client_secret)
+        s.set("cfg:google_base_url", base_url)
     return jsonify(ok=True)
 
 
@@ -186,7 +195,8 @@ def google_start():
             return redirect(url_for("setup"))
         state = secrets.token_urlsafe(24)
         s.set("cfg:google_oauth_state", state)
-    url = authorization_url(client_id, _google_redirect_uri(), state)
+        redirect_uri = _google_redirect_uri(s)
+    url = authorization_url(client_id, redirect_uri, state)
     return redirect(url)
 
 
@@ -208,7 +218,7 @@ def google_callback():
             s.log("error", "Google sign-in failed: invalid state")
             return redirect(url_for("setup", google_error="Sign-in failed — try again."))
         try:
-            tokens = exchange_code(client_id, client_secret, code, _google_redirect_uri())
+            tokens = exchange_code(client_id, client_secret, code, _google_redirect_uri(s))
             refresh_token = tokens.get("refresh_token")
             if not refresh_token:
                 # happens if the user had already consented and Google skipped

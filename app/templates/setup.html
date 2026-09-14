@@ -64,12 +64,20 @@
         Connected as <b>{{ connections.google.display_name }}</b> · <a href="#" onclick="disconnect(event,'google')">change</a>
       </div>
 
-      {% elif google_client_id %}
+      {% elif google_client_id and google_base_url %}
       <p class="hint">Google Cloud app saved. Sign in to finish connecting:</p>
       <div class="row" style="margin-top:8px">
         <a class="btn small" href="/connect/google/start">Connect Google Tasks</a>
         <a href="#" class="hint" onclick="document.getElementById('g-form').hidden=false; return false;">use different credentials</a>
       </div>
+
+      {% elif google_client_id %}
+      <p class="sub" style="margin:4px 0 10px">
+        One more thing: tell TaskBridge the exact address you'll use to reach
+        it — it can't reliably detect this itself behind a reverse proxy
+        (Umbrel's included), and it must match what you registered in Google
+        Cloud Console.
+      </p>
 
       {% else %}
       <p class="sub" style="margin:4px 0 10px">
@@ -87,18 +95,20 @@
         <li><b>Clients</b> (left sidebar) → <b>Create client</b> → Application type <b>Web application</b>.</li>
         <li>Under <b>Authorized redirect URIs</b>, add exactly:
           <div class="code" style="font-size:14px; padding:8px 10px; text-align:left; word-break:break-all">{{ google_redirect_uri }}</div>
-          Google requires this to be <code>http://localhost:&lt;port&gt;/…</code> or a real domain with a public suffix (e.g. <code>.com</code>, <code>.org</code>) — a bare LAN IP like <code>http://192.168.1.50:3737/…</code> is rejected. If that's how you reach TaskBridge (most home servers), point a free
-          <a href="https://www.duckdns.org" target="_blank" rel="noopener">DuckDNS</a> hostname at that IP and use
-          <code>http://yourname.duckdns.org:3737/oauth/google/callback</code> instead — DNS-only, no port-forwarding needed. Already on Tailscale? Its MagicDNS name works too.</li>
-        <li>Create it, then copy the <b>Client ID</b> and <b>Client secret</b> into the form below.</li>
+          Google requires this to be <code>http://localhost:&lt;port&gt;/…</code> or a real domain with a public suffix (e.g. <code>.com</code>, <code>.org</code>) — a bare LAN IP like <code>http://192.168.1.50:3737/…</code> is rejected. If that's how you reach TaskBridge (most home servers), give it a real hostname first — a free <a href="https://www.duckdns.org" target="_blank" rel="noopener">DuckDNS</a> domain pointed at that IP, or (behind a reverse proxy, Umbrel included) a Tailscale MagicDNS address with HTTPS enabled — then use that instead.</li>
+        <li>Create it, then copy the <b>Client ID</b> and <b>Client secret</b> into the form below — and set <b>TaskBridge's address</b> to that exact same hostname.</li>
       </ol>
       {% endif %}
 
-      <div id="g-form" {% if connections.google or google_client_id %}hidden{% endif %} style="margin-top:10px">
+      <div id="g-form" {% if connections.google or (google_client_id and google_base_url) %}hidden{% endif %} style="margin-top:10px">
         <label>Client ID</label>
         <input type="text" id="g-client-id" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" value="{{ google_client_id or '' }}">
         <label>Client secret</label>
         <input type="password" id="g-client-secret" placeholder="GOCSPX-…" autocomplete="off">
+        <label>TaskBridge's address
+          <span class="hint">Must exactly match the redirect URI's origin above — not auto-detected, since a reverse proxy (Umbrel's included) usually hides the real one from TaskBridge.</span>
+        </label>
+        <input type="text" id="g-base-url" placeholder="https://yourname.duckdns.org:3737" autocomplete="off" value="{{ google_base_url or '' }}">
         <div class="row" style="margin-top:10px">
           <button class="small" onclick="gSaveCreds()">Save &amp; continue</button>
           <span id="g-msg" class="msg"></span>
@@ -204,10 +214,11 @@ async function msConnect() {
 async function gSaveCreds() {
   const client_id = $('#g-client-id').value.trim();
   const client_secret = $('#g-client-secret').value.trim();
+  const base_url = $('#g-base-url').value.trim();
   const msg = $('#g-msg');
-  if (!client_id || !client_secret) { msg.textContent = 'Paste both fields.'; msg.className = 'msg err'; return; }
+  if (!client_id || !client_secret || !base_url) { msg.textContent = 'Fill in all three fields.'; msg.className = 'msg err'; return; }
   msg.textContent = 'Saving…'; msg.className = 'msg';
-  const res = await post('/connect/google/credentials', {client_id, client_secret});
+  const res = await post('/connect/google/credentials', {client_id, client_secret, base_url});
   if (res.ok) location.reload();
   else { msg.textContent = res.error || 'Failed.'; msg.className = 'msg err'; }
 }
