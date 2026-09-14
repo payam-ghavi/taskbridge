@@ -63,7 +63,20 @@ class TodoistClient:
         return j
 
     def read(self):
-        return self._sync(["projects", "items"])
+        """Incremental items+projects since ``sync_token``, plus a *full*
+        projects refresh — list reconciliation needs the complete current
+        project set every cycle, not just the ones that changed, and unlike
+        items (which can be large), projects are cheap to fetch in full."""
+        j = self._sync(["projects", "items"])
+        self._full_sync_projects()
+        return j
+
+    def _full_sync_projects(self):
+        data = {"sync_token": "*", "resource_types": json.dumps(["projects"])}
+        r = self.s.post(f"{self.base}/sync", data=data, timeout=90)
+        r.raise_for_status()
+        for pr in r.json().get("projects", []):
+            self.projects[pr["id"]] = pr
 
     def apply(self, commands):
         if not commands or self.dry_run:

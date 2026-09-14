@@ -90,3 +90,8 @@ button.small { padding: 6px 11px; font-size: 13px; }
 details.settings summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
 .field-row { display: flex; gap: 14px; }
 .field-row > div { flex: 1; }
+
+.steps-list { margin: 10px 0; padding-left: 20px; font-size: 13px; color: var(--muted); }
+.steps-list li { margin-bottom: 8px; }
+.steps-list b { color: var(--text); }
+.steps-list a { color: var(--accent); }

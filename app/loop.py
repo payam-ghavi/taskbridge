@@ -5,11 +5,23 @@ import time
 import traceback
 
 from .engine import Config, sync_once
+from .google_client import GoogleTasksClient
 from .graph_client import GraphClient
-from .store import Store
+from .store import PROVIDER_LABEL, Store
 from .todoist_client import TodoistClient
 
 log = logging.getLogger("taskbridge.loop")
+
+
+def _build_client(provider, creds, dry_run=False):
+    if provider == "todoist":
+        return TodoistClient(creds.get("token"), creds.get("sync_token"), dry_run=dry_run)
+    if provider == "mstodo":
+        return GraphClient(creds.get("client_id"), creds.get("refresh_token"), dry_run=dry_run)
+    if provider == "google":
+        return GoogleTasksClient(creds.get("client_id"), creds.get("client_secret"),
+                                  creds.get("refresh_token"), dry_run=dry_run)
+    raise ValueError(provider)
 
 
 class SyncLoop(threading.Thread):
@@ -52,39 +64,39 @@ class SyncLoop(threading.Thread):
                 store.set("status:running", "not-configured")
                 return interval
 
-            td_token = store.get("cfg:todoist_api_token")
-            ms_refresh = store.get("ms_refresh_token")
-            ms_client_id = store.get("cfg:ms_client_id") or None
             cfg = Config(
                 conflict_winner=(store.cfg("conflict_winner") or "todoist"),
                 match_existing=(store.cfg("match_existing", "true") != "false"),
             )
 
             store.set("status:running", "syncing")
-            try:
-                td = TodoistClient(td_token, store.get("todoist_sync_token"))
-                ms = GraphClient(ms_client_id, ms_refresh)
-            except RuntimeError as e:
-                # token refresh rejected -> Microsoft needs reconnecting
-                store.set("status:ms_auth_expired", "true")
-                store.set("status:last_error", str(e).splitlines()[0])
+            clients = {}
+            for provider, conn in store.all_connections().items():
+                try:
+                    clients[provider] = _build_client(provider, conn["creds"])
+                except RuntimeError as e:
+                    # token refresh rejected -> that provider needs reconnecting;
+                    # keep syncing whatever other providers are still healthy.
+                    store.set(f"status:{provider}_auth_expired", "true")
+                    store.set("status:last_error", f"{PROVIDER_LABEL.get(provider, provider)}: {str(e).splitlines()[0]}")
+                    store.log("error", f"{PROVIDER_LABEL.get(provider, provider)} sign-in expired — reconnect in Settings")
+                else:
+                    store.delete(f"status:{provider}_auth_expired")
+
+            if len(clients) < 2:
                 store.set("status:last_sync_at", str(time.time()))
                 store.set("status:running", "error")
-                store.log("error", "Microsoft sign-in expired — reconnect in Settings")
                 return interval
 
-            result = sync_once(store, td, ms, cfg)
+            result = sync_once(store, clients, cfg)
 
-            store.delete("status:ms_auth_expired")
             store.delete("status:last_error")
             store.set("status:last_sync_at", str(time.time()))
-            store.set("status:last_result",
-                      f"{result['todoist_changes']} from Todoist, {result['mstodo_changes']} from To Do")
+            summary = ", ".join(f"{n} {PROVIDER_LABEL.get(p, p)}" for p, n in result.items())
+            store.set("status:last_result", summary or "no changes")
             store.set("status:running", "idle")
-            changed = result["todoist_changes"] + result["mstodo_changes"]
-            if changed:
-                store.log("info", f"Synced: {result['todoist_changes']} Todoist / "
-                                  f"{result['mstodo_changes']} To Do changes")
+            if sum(result.values()):
+                store.log("info", f"Synced: {summary}")
             return interval
         finally:
             store.close()
