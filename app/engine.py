@@ -199,11 +199,17 @@ def _gather_changes(store, provider, client, clients):
     raise ValueError(provider)
 
 
-def _handle_removed_item(store, clients, queue, provider, item_id):
+def _handle_removed_item(store, clients, queue, provider, item_id, removed_this_cycle):
     group = store.task_group_for(provider, item_id)
     if not group:
         return
     for other_provider, link in group["links"].items():
+        # Record every linked (provider, item_id) as gone this cycle -- if
+        # another provider's deletion of the SAME task is processed later
+        # in this same cycle, its raw data was already fetched before this
+        # cascade ran and would otherwise look like a brand-new, unmapped
+        # item and get resurrected.
+        removed_this_cycle.add((other_provider, link["item_id"]))
         if other_provider == provider or other_provider not in clients:
             continue
         try:
@@ -285,11 +291,18 @@ def _handle_new_item(store, clients, queue, pending, provider, list_id, item_id,
         store.create_task_group(merged_canon, links)
 
 
-def _handle_change(store, clients, queue, pending, provider, list_id, item_id, raw_item, changed_ids, cfg):
+def _handle_change(store, clients, queue, pending, provider, list_id, item_id, raw_item,
+                    changed_ids, cfg, removed_this_cycle):
     if provider == "todoist" and raw_item is not None and raw_item.get("parent_id"):
         return   # sub-tasks are out of scope
     if raw_item is None or _is_removed(provider, raw_item):
-        _handle_removed_item(store, clients, queue, provider, item_id)
+        _handle_removed_item(store, clients, queue, provider, item_id, removed_this_cycle)
+        return
+    if (provider, item_id) in removed_this_cycle:
+        # A linked provider's deletion of this SAME task was already
+        # processed earlier this cycle (see _handle_removed_item) -- this
+        # entry is stale data fetched before that cascade ran, not a real
+        # still-existing task.
         return
 
     canon = providers.to_canonical(provider, raw_item)
@@ -313,11 +326,12 @@ def sync_once(store, clients, cfg):
     changed_ids = {p: {iid for _, iid, _ in items} for p, items in raw_changes.items()}
 
     queue, pending = [], []
+    removed_this_cycle = set()
     for provider, items in raw_changes.items():
         for list_id, item_id, raw_item in items:
             try:
                 _handle_change(store, clients, queue, pending, provider, list_id, item_id,
-                                raw_item, changed_ids, cfg)
+                                raw_item, changed_ids, cfg, removed_this_cycle)
                 store.commit()
             except providers.NotFoundErrors:
                 store.remove_task_link(provider, item_id)

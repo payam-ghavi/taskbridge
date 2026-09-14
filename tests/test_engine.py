@@ -472,6 +472,75 @@ def run_ms_reminder_due_test():
           due_cmd["args"]["due"] == {"date": "2026-09-24"}, f"got {due_cmd['args'].get('due')}")
 
 
+def run_simultaneous_deletion_test():
+    """Regression: deleting the SAME task, or the SAME list, on two providers
+    in the same cycle (e.g. the user deletes it in Todoist right as Microsoft
+    also reports it gone) must not crash or double-process -- the second
+    provider's deletion event arrives for a task_group/list_group the first
+    provider's deletion already cleaned up. _handle_removed_item's `if not
+    group: return` guard and _handle_list_removed's use of an
+    already-materialized group list (plus every real delete_task/delete_list
+    swallowing 404 internally) should already cover this; this test locks
+    that behavior in."""
+    store, path = fresh_store()
+    seed_connections(store)
+    td, ms, gg = FakeTodoist(), FakeGraph(), FakeGoogle()
+    clients = {"todoist": td, "mstodo": ms, "google": gg}
+    cfg = Config(conflict_winner="todoist", match_existing=True)
+
+    td_inbox = td.add_project("Inbox", is_inbox=True)
+    ms_default = ms.create_list("Tasks")
+    ms.lists[ms_default["id"]]["wellknownListName"] = "defaultList"
+    g_default = gg.create_list("My Tasks")
+    gg._default_id = g_default["id"]
+    sync_once(store, clients, cfg)   # forms the default group across all 3
+
+    # --- simultaneous TASK deletion on two providers ---
+    tid = td.seed_item(content="Buy milk", project_id=td_inbox)
+    sync_once(store, clients, cfg)
+    group = store.task_group_for("todoist", tid)
+    ms_id, ms_list = group["links"]["mstodo"]["item_id"], group["links"]["mstodo"]["list_id"]
+    google_id = group["links"]["google"]["item_id"]
+
+    td.delete_item(tid)                                  # gone on Todoist
+    del ms.tasks[ms_list][ms_id]                          # gone on Microsoft too, same cycle
+    ms._touch(ms_list, ms_id)                             # (so delta() reports it as removed)
+
+    try:
+        sync_once(store, clients, cfg)
+        crashed = False
+    except Exception as e:
+        crashed = True
+        crash_detail = repr(e)
+    check("W1: simultaneous same-task deletion on two providers doesn't crash",
+          not crashed, "" if not crashed else crash_detail)
+    check("W2: the task group is fully gone",
+          store.task_group_for("google", google_id) is None)
+
+    # --- simultaneous LIST deletion on two providers ---
+    td_work = td.add_project("Work")
+    sync_once(store, clients, cfg)
+    g_work = next(g for g in store.all_list_groups() if g["name"] == "Work")
+    google_work_id = g_work["members"]["google"]
+
+    td.delete_project(td_work)                            # gone on Todoist
+    gg.delete_list(google_work_id)                         # gone on Google too, same cycle
+
+    try:
+        sync_once(store, clients, cfg)
+        crashed = False
+    except Exception as e:
+        crashed = True
+        crash_detail = repr(e)
+    check("W3: simultaneous same-list deletion on two providers doesn't crash",
+          not crashed, "" if not crashed else crash_detail)
+    check("W4: the list group is fully gone, not resurrected",
+          not any(g["name"] == "Work" for g in store.all_list_groups()))
+
+    store.close()
+    os.remove(path)
+
+
 def run_list_deletion_test():
     """Regression: deleting a list on one provider must delete the
     corresponding list -- and everything in it -- on every other connected
@@ -634,6 +703,8 @@ if __name__ == "__main__":
     run_ms_reminder_due_test()
     print("\n=== list deletion propagation test ===")
     run_list_deletion_test()
+    print("\n=== simultaneous cross-provider deletion test ===")
+    run_simultaneous_deletion_test()
     print("\n=== v1 -> v2 migration test ===")
     run_migration_test()
     print(f"\n{'ALL PASSED' if not FAILURES else f'{len(FAILURES)} FAILED: ' + ', '.join(FAILURES)}")
