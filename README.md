@@ -14,6 +14,7 @@ in the others within a minute. One small container, no cloud middleman.
 | Priority | ✅ as an "important" flag (Todoist P1/P2 ⇄ To Do High importance). Google Tasks has no priority field, so it just won't carry one — the other two still sync it between themselves. |
 | Lists ⇄ Projects ⇄ Task lists | ✅ matched by name; the missing side is created on connect. Default/inbox lists always match regardless of what each app calls them. |
 | Deleting a task | ✅ deletes it everywhere it's linked |
+| Deleting a list / project | ✅ deletes the matching list (and everything in it) on every other connected app too |
 
 **Not synced:** sub-tasks / checklist items, recurrence *rules* (a recurring
 task still syncs its next due date), labels, attachments.

@@ -102,6 +102,14 @@ class GraphClient:
             return None
         return self._req("POST", "/me/todo/lists", json={"displayName": name}).json()
 
+    def delete_list(self, list_id):
+        if self.dry_run:
+            return
+        try:
+            self._req("DELETE", f"/me/todo/lists/{list_id}")
+        except NotFound:
+            pass
+
     # ---- tasks ---------------------------------------------------------
     def list_tasks(self, list_id):
         if list_id not in self._task_cache:

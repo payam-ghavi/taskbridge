@@ -58,6 +58,19 @@ def create_list(provider, client, name):
     raise ValueError(provider)
 
 
+def delete_list(provider, client, list_id):
+    if provider == "todoist":
+        client.delete_project(list_id)
+        return
+    if provider == "mstodo":
+        client.delete_list(list_id)
+        return
+    if provider == "google":
+        client.delete_list(list_id)
+        return
+    raise ValueError(provider)
+
+
 def find_unmapped_match(provider, client, list_id, canon, mapped_ids):
     """Search `list_id` for an unmapped, not-completed item matching canon's
     title+due — used to link pre-existing tasks instead of duplicating them."""

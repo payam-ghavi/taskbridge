@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.7"
+version: "2.0.8"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -16,7 +16,7 @@ description: >-
   priority (as an "important" flag — Google Tasks has no priority field, so
   it just won't carry one). Lists/projects are matched by name; a missing one
   is created on connect. Completing or deleting a task does the same
-  everywhere it's linked.
+  everywhere it's linked — and so does deleting a whole list or project.
 
 
   Setup: paste a Todoist API token, sign in to Microsoft by entering a short
@@ -39,6 +39,13 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.8: deleting a list or project on one app now deletes the matching one
+  (and everything in it) on every other connected app, instead of leaving a
+  dangling link — which previously could make sync fail outright with a
+  "list not found" error until the pairing was manually reset. Sync now
+  detects and cleans this up on its own.
+
+
   2.0.7: removes the temporary diagnostic logging added in 2.0.5/2.0.6 while
   chasing the timezone bug below — no functional change.
 

@@ -242,6 +242,24 @@ class Store:
         return {r["provider"]: r["list_id"] for r in self.db.execute(
             "SELECT provider, list_id FROM list_group_members WHERE group_id=?", (group_id,))}
 
+    def delete_list_group(self, group_id):
+        """A list behind this group was deleted on one provider -- mirror
+        that everywhere: every task_group whose tasks lived in any of this
+        group's member lists goes away, then the group itself, the same way
+        an individual deleted task takes its whole task_group with it."""
+        list_ids = list(self.list_group_members(group_id).values())
+        if list_ids:
+            placeholders = ",".join("?" * len(list_ids))
+            rows = self.db.execute(
+                f"SELECT DISTINCT group_id FROM task_links WHERE list_id IN ({placeholders})",
+                list_ids,
+            ).fetchall()
+            for r in rows:
+                self.db.execute("DELETE FROM task_links WHERE group_id=?", (r["group_id"],))
+                self.db.execute("DELETE FROM task_groups WHERE id=?", (r["group_id"],))
+        self.db.execute("DELETE FROM list_group_members WHERE group_id=?", (group_id,))
+        self.db.execute("DELETE FROM list_groups WHERE id=?", (group_id,))
+
     def all_list_groups(self):
         groups = self.db.execute("SELECT * FROM list_groups").fetchall()
         return [{"id": g["id"], "name": g["name"], "members": self.list_group_members(g["id"])}

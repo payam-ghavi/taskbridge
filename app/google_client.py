@@ -136,6 +136,14 @@ class GoogleTasksClient:
             return None
         return self._req("POST", "/users/@me/lists", json={"title": name}).json()
 
+    def delete_list(self, tasklist_id):
+        if self.dry_run:
+            return
+        try:
+            self._req("DELETE", f"/users/@me/lists/{tasklist_id}")
+        except NotFound:
+            pass
+
     # ---- tasks ---------------------------------------------------------
     def list_tasks(self, tasklist_id):
         out, params = [], {

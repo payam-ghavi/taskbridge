@@ -65,11 +65,48 @@ def _existing_group_key(members, provider_lists):
     return None
 
 
+def _handle_list_removed(store, clients, group, gone_provider):
+    """A list was deleted on `gone_provider`'s side -- mirror that deletion
+    onto every other provider still syncing this group (same as an
+    individual deleted task takes its links down everywhere), then drop the
+    group itself. Returns the (provider, list_id) pairs actually deleted, so
+    the caller can prune its own already-fetched list snapshot -- otherwise
+    a stale snapshot would make the lists we just deleted look "new" again
+    and re-group them right back together."""
+    deleted = []
+    for other_provider, other_list_id in group["members"].items():
+        if other_provider == gone_provider or other_provider not in clients:
+            continue
+        try:
+            providers.delete_list(other_provider, clients[other_provider], other_list_id)
+        except providers.NotFoundErrors:
+            pass
+        deleted.append((other_provider, other_list_id))
+    store.delete_list_group(group["id"])
+    store.log("info", f"List {group['name']!r} was deleted on {gone_provider} — removed it everywhere else too")
+    return deleted
+
+
 def reconcile_lists(store, clients):
     """Match each connected provider's lists to the others by name (default /
     inbox lists always unify, regardless of what each provider calls them),
     then create the missing side on every provider that doesn't have one yet."""
     provider_lists = {p: providers.get_lists(p, c) for p, c in clients.items()}
+    existing_ids = {p: {l["id"] for l in lists} for p, lists in provider_lists.items()}
+
+    # A list a group used to have on some provider is no longer there ->
+    # that provider deleted it. Mirror the deletion everywhere else instead
+    # of leaving the group pointing at a list that no longer exists (which
+    # would otherwise crash the next step that tries to read it).
+    for g in store.all_list_groups():
+        for provider, list_id in g["members"].items():
+            if provider in existing_ids and list_id not in existing_ids[provider]:
+                deleted = _handle_list_removed(store, clients, g, provider)
+                for dp, dlid in deleted:
+                    existing_ids[dp].discard(dlid)
+                    provider_lists[dp] = [l for l in provider_lists[dp] if l["id"] != dlid]
+                break
+
     already_grouped = {(p, lid) for g in store.all_list_groups() for p, lid in g["members"].items()}
     group_id_by_key = {}
     for g in store.all_list_groups():
@@ -112,7 +149,7 @@ def _is_removed(provider, raw_item):
     return False
 
 
-def _gather_changes(store, provider, client):
+def _gather_changes(store, provider, client, clients):
     """-> [(list_id, item_id, raw_item_or_None)] ; None raw_item = removed."""
     out = []
     if provider == "todoist":
@@ -125,7 +162,14 @@ def _gather_changes(store, provider, client):
             list_id = g["members"].get("mstodo")
             if not list_id:
                 continue
-            tasks, new_link = client.delta(list_id, store.get_cursor("mstodo", list_id))
+            try:
+                tasks, new_link = client.delta(list_id, store.get_cursor("mstodo", list_id))
+            except providers.NotFoundErrors:
+                # Deleted on Microsoft's side between reconcile_lists (which
+                # normally catches this first) and here -- handle it the
+                # same way: remove the list everywhere else too.
+                _handle_list_removed(store, clients, g, "mstodo")
+                continue
             for t in tasks:
                 out.append((list_id, t["id"], t))
             if new_link:
@@ -139,7 +183,11 @@ def _gather_changes(store, provider, client):
             list_id = g["members"].get("google")
             if not list_id:
                 continue
-            items = client.list_tasks(list_id)
+            try:
+                items = client.list_tasks(list_id)
+            except providers.NotFoundErrors:
+                _handle_list_removed(store, clients, g, "google")
+                continue
             current_ids = {t["id"] for t in items}
             known_ids = store.mapped_item_ids("google", list_id=list_id)
             for removed_id in known_ids - current_ids:
@@ -260,7 +308,7 @@ def sync_once(store, clients, cfg):
     reconcile_lists(store, clients)
     store.commit()
 
-    raw_changes = {p: _gather_changes(store, p, c) for p, c in clients.items()}
+    raw_changes = {p: _gather_changes(store, p, c, clients) for p, c in clients.items()}
     store.commit()   # _gather_changes persists mstodo delta cursors as it goes
     changed_ids = {p: {iid for _, iid, _ in items} for p, items in raw_changes.items()}
 

@@ -98,6 +98,9 @@ class TodoistClient:
         }])
         return temp_map.get(temp)
 
+    def delete_project(self, project_id):
+        self.apply([{"type": "project_delete", "uuid": _uuid(), "args": {"id": project_id}}])
+
 
 def _due_arg(c):
     """due_time is always UTC (that's what Microsoft's reminderDateTime and

@@ -74,6 +74,12 @@ class FakeTodoist:
         self._all_items[iid]["is_deleted"] = True
         self._touch("item", iid)
 
+    def delete_project(self, pid):
+        if pid in self._all_projects:
+            self._all_projects[pid]["is_deleted"] = True
+        self._touch("project", pid)
+        self.calls["delete_project"] = self.calls.get("delete_project", 0) + 1
+
     def current_item(self, iid):
         return self._all_items.get(iid)
 
@@ -154,6 +160,11 @@ class FakeGraph:
         self.tasks[lid] = {}
         return self.lists[lid]
 
+    def delete_list(self, list_id):
+        self.lists.pop(list_id, None)
+        self.tasks.pop(list_id, None)
+        self.calls["delete_list"] = self.calls.get("delete_list", 0) + 1
+
     def list_tasks(self, list_id):
         return list(self.tasks.get(list_id, {}).values())
 
@@ -220,6 +231,11 @@ class FakeGoogle:
         self.lists[lid] = {"id": lid, "title": name}
         self.tasks[lid] = {}
         return self.lists[lid]
+
+    def delete_list(self, list_id):
+        self.lists.pop(list_id, None)
+        self.tasks.pop(list_id, None)
+        self.calls["delete_list"] = self.calls.get("delete_list", 0) + 1
 
     def list_tasks(self, list_id):
         return list(self.tasks.get(list_id, {}).values())
@@ -456,6 +472,71 @@ def run_ms_reminder_due_test():
           due_cmd["args"]["due"] == {"date": "2026-09-24"}, f"got {due_cmd['args'].get('due')}")
 
 
+def run_list_deletion_test():
+    """Regression: deleting a list on one provider must delete the
+    corresponding list -- and everything in it -- on every other connected
+    provider too, mirroring individual-task delete propagation at the list
+    level. Previously a list vanishing on Microsoft or Google crashed the
+    entire sync cycle (NotFound propagating out of _gather_changes); now
+    reconcile_lists notices it proactively (list missing from get_lists())
+    and tears the group down everywhere before anything tries to read it."""
+    store, path = fresh_store()
+    seed_connections(store)
+    td, ms, gg = FakeTodoist(), FakeGraph(), FakeGoogle()
+    clients = {"todoist": td, "mstodo": ms, "google": gg}
+    cfg = Config(conflict_winner="todoist", match_existing=True)
+
+    td.add_project("Inbox", is_inbox=True)
+    ms_default = ms.create_list("Tasks")
+    ms.lists[ms_default["id"]]["wellknownListName"] = "defaultList"
+    g_default = gg.create_list("My Tasks")
+    gg._default_id = g_default["id"]
+
+    td_groceries = td.add_project("Groceries")
+    sync_once(store, clients, cfg)   # forms the default group + a Groceries group across all 3
+
+    g_groceries = next(g for g in store.all_list_groups() if g["name"] == "Groceries")
+    ms_groceries_id = g_groceries["members"]["mstodo"]
+    google_groceries_id = g_groceries["members"]["google"]
+
+    tid = td.seed_item(content="Buy milk", project_id=td_groceries)
+    sync_once(store, clients, cfg)
+    group = store.task_group_for("todoist", tid)
+    check("X0: task linked across all three before the list is deleted",
+          group is not None and set(group["links"]) == {"todoist", "mstodo", "google"},
+          f"group={group}")
+    ms_item_id = group["links"]["mstodo"]["item_id"]
+
+    ms_delete_calls_before = ms.calls.get("delete_list", 0)
+    google_delete_calls_before = gg.calls.get("delete_list", 0)
+
+    # Simulate deleting the "Groceries" list on Todoist's side.
+    td.delete_project(td_groceries)
+    sync_once(store, clients, cfg)   # must not raise
+
+    check("X1: the Groceries list group is gone from the store",
+          not any(g["name"] == "Groceries" for g in store.all_list_groups()))
+    check("X2: the corresponding Microsoft list was deleted too",
+          ms_groceries_id not in ms.lists,
+          f"ms.calls={ms.calls}")
+    check("X3: the corresponding Google list was deleted too",
+          google_groceries_id not in gg.lists,
+          f"gg.calls={gg.calls}")
+    check("X4: delete_list was actually called on both other providers",
+          ms.calls.get("delete_list", 0) == ms_delete_calls_before + 1
+          and gg.calls.get("delete_list", 0) == google_delete_calls_before + 1)
+    check("X5: the task group that lived in that list is gone too",
+          store.task_group_for("mstodo", ms_item_id) is None)
+
+    # A second cycle must stay clean (no crash re-processing a now-gone list).
+    sync_once(store, clients, cfg)
+    check("X6: a follow-up cycle doesn't resurrect the deleted list",
+          not any(g["name"] == "Groceries" for g in store.all_list_groups()))
+
+    store.close()
+    os.remove(path)
+
+
 def run_late_join_test():
     """Regression: connecting Google (or any provider) AFTER the others
     already have a default group must join that existing group, not spawn a
@@ -551,6 +632,8 @@ if __name__ == "__main__":
     run_late_join_test()
     print("\n=== MS reminder/due-time test ===")
     run_ms_reminder_due_test()
+    print("\n=== list deletion propagation test ===")
+    run_list_deletion_test()
     print("\n=== v1 -> v2 migration test ===")
     run_migration_test()
     print(f"\n{'ALL PASSED' if not FAILURES else f'{len(FAILURES)} FAILED: ' + ', '.join(FAILURES)}")
