@@ -50,7 +50,11 @@ Then open `http://localhost:3737` and connect at least two apps:
 3. **Google Tasks** *(optional)* — Google doesn't offer a shared sign-in like
    Microsoft's, so this one needs a free Google Cloud OAuth app of your own
    first (same pattern Nextcloud/Immich use for Google integrations) — the
-   setup page walks through it, about 10 minutes, one time.
+   setup page walks through it, about 10 minutes, one time. One thing to know
+   going in: Google requires the redirect URL to be `http://localhost:<port>`
+   or a real domain — a bare LAN IP (the common case for a home server) is
+   rejected, so if that's how you reach TaskBridge, point a free
+   [DuckDNS](https://www.duckdns.org) hostname at it first.
 4. Pick a sync interval, a conflict rule, and hit **Start syncing**.
 
 Images on `ghcr.io/payam-ghavi/taskbridge` and

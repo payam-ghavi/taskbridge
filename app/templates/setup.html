@@ -81,11 +81,15 @@
       <ol id="g-steps" class="steps-list" hidden>
         <li>Go to <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">console.cloud.google.com</a> and create a project (any name).</li>
         <li><b>APIs &amp; Services → Library</b> → search <b>Google Tasks API</b> → Enable.</li>
-        <li><b>APIs &amp; Services → OAuth consent screen</b> → User type <b>External</b> → fill in the required fields (app name, your email) → Save. You can leave it in "Testing" and add yourself as a test user, or click "Publish app" — no Google review needed unless you plan to share the client widely.</li>
-        <li><b>APIs &amp; Services → Credentials → Create Credentials → OAuth client ID</b> → Application type <b>Web application</b>.</li>
+        <li><b>Google Auth Platform</b> (left sidebar) → <b>Get started</b> → App name "TaskBridge" + your email as support email → Audience <b>External</b> → add your own Google account under <b>test users</b> → your email again for contact → agree &amp; create.</li>
+        <li><b>Data Access</b> (left sidebar) → <b>Add or remove scopes</b> → filter for "tasks" → check <code>.../auth/tasks</code> ("Create, edit, organize, and delete all your tasks") → Update → <b>Save</b>.
+          <br><b>Don't skip this</b> — without it, signing in still appears to work but every actual sync call fails with a 403.</li>
+        <li><b>Clients</b> (left sidebar) → <b>Create client</b> → Application type <b>Web application</b>.</li>
         <li>Under <b>Authorized redirect URIs</b>, add exactly:
           <div class="code" style="font-size:14px; padding:8px 10px; text-align:left; word-break:break-all">{{ google_redirect_uri }}</div>
-        </li>
+          Google requires this to be <code>http://localhost:&lt;port&gt;/…</code> or a real domain with a public suffix (e.g. <code>.com</code>, <code>.org</code>) — a bare LAN IP like <code>http://192.168.1.50:3737/…</code> is rejected. If that's how you reach TaskBridge (most home servers), point a free
+          <a href="https://www.duckdns.org" target="_blank" rel="noopener">DuckDNS</a> hostname at that IP and use
+          <code>http://yourname.duckdns.org:3737/oauth/google/callback</code> instead — DNS-only, no port-forwarding needed. Already on Tailscale? Its MagicDNS name works too.</li>
         <li>Create it, then copy the <b>Client ID</b> and <b>Client secret</b> into the form below.</li>
       </ol>
       {% endif %}
