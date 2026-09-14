@@ -51,13 +51,30 @@ def _identity_key(list_obj):
     return _DEFAULT_KEY if list_obj["is_default"] else _norm(list_obj["name"])
 
 
+def _existing_group_key(members, provider_lists):
+    """The identity key an already-formed group would be filed under, so a
+    newly-connected provider's default list finds it instead of spawning a
+    second, disconnected "default" group. A group's default-ness isn't
+    stored on list_groups itself, so it's inferred from whether any current
+    member list is flagged is_default (the same signal used for a brand-new
+    list)."""
+    for provider, list_id in members.items():
+        for l in provider_lists.get(provider, []):
+            if l["id"] == list_id and l["is_default"]:
+                return _DEFAULT_KEY
+    return None
+
+
 def reconcile_lists(store, clients):
     """Match each connected provider's lists to the others by name (default /
     inbox lists always unify, regardless of what each provider calls them),
     then create the missing side on every provider that doesn't have one yet."""
     provider_lists = {p: providers.get_lists(p, c) for p, c in clients.items()}
     already_grouped = {(p, lid) for g in store.all_list_groups() for p, lid in g["members"].items()}
-    group_id_by_key = {_norm(g["name"]): g["id"] for g in store.all_list_groups()}
+    group_id_by_key = {}
+    for g in store.all_list_groups():
+        key = _existing_group_key(g["members"], provider_lists) or _norm(g["name"])
+        group_id_by_key[key] = g["id"]
 
     pending = {}
     for provider, lists in provider_lists.items():

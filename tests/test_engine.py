@@ -390,6 +390,45 @@ def run():
     os.remove(path)
 
 
+def run_late_join_test():
+    """Regression: connecting Google (or any provider) AFTER the others
+    already have a default group must join that existing group, not spawn a
+    second, disconnected one — this is what silently broke sync for tasks
+    added directly in the newly-connected app's default list."""
+    store, path = fresh_store()
+    store.set_connection("todoist", "Test Todoist", {"token": "x"})
+    store.set_connection("mstodo", "test@outlook.com", {"refresh_token": "x"})
+    store.commit()
+    td, ms = FakeTodoist(), FakeGraph()
+    cfg = Config(conflict_winner="todoist", match_existing=True)
+
+    td.add_project("Inbox", is_inbox=True)
+    ms_default = ms.create_list("Tasks")
+    ms.lists[ms_default["id"]]["wellknownListName"] = "defaultList"
+
+    sync_once(store, {"todoist": td, "mstodo": ms}, cfg)
+    groups = store.all_list_groups()
+    check("Z1: two-provider default group forms first", len(groups) == 1, f"groups={groups}")
+
+    # Google connects later, after that default group already exists.
+    store.set_connection("google", "test@gmail.com", {"client_id": "x", "client_secret": "x", "refresh_token": "x"})
+    store.commit()
+    gg = FakeGoogle()
+    g_default = gg.create_list("My Tasks")
+    gg._default_id = g_default["id"]
+
+    sync_once(store, {"todoist": td, "mstodo": ms, "google": gg}, cfg)
+    groups = store.all_list_groups()
+    check("Z2: late-joining default list merges into the SAME group, not a second one",
+          len(groups) == 1, f"groups={groups}")
+    members = groups[0]["members"] if groups else {}
+    check("Z3: merged group has all three providers",
+          set(members) == {"todoist", "mstodo", "google"}, f"members={members}")
+
+    store.close()
+    os.remove(path)
+
+
 def run_migration_test():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -442,6 +481,8 @@ def run_migration_test():
 if __name__ == "__main__":
     print("=== scenario tests (fake clients) ===")
     run()
+    print("\n=== late-join list reconciliation test ===")
+    run_late_join_test()
     print("\n=== v1 -> v2 migration test ===")
     run_migration_test()
     print(f"\n{'ALL PASSED' if not FAILURES else f'{len(FAILURES)} FAILED: ' + ', '.join(FAILURES)}")
