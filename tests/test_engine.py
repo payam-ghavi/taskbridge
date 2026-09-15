@@ -700,6 +700,55 @@ def run_list_deletion_test():
     os.remove(path)
 
 
+def run_duplicate_list_test():
+    """Regression: seen live on a real account -- two Microsoft To Do lists
+    both named "Flagged Emails" (a leftover duplicate from earlier churn).
+    Every cycle, reconcile_lists saw whichever one wasn't currently the
+    group's mstodo member as "unpaired" and reassigned the slot to it
+    (add_list_group_member used INSERT OR REPLACE), undoing the previous
+    cycle's assignment -- the pairing flip-flopped between the two lists
+    forever and never converged (no crash, just permanently stuck: no task
+    ever linked through that group). A group's (group_id, provider) slot
+    must stick to whichever list won it first."""
+    store, path = fresh_store()
+    seed_connections(store)
+    td, ms, gg = FakeTodoist(), FakeGraph(), FakeGoogle()
+    clients = {"todoist": td, "mstodo": ms, "google": gg}
+    cfg = Config(conflict_winner="todoist", match_existing=True)
+
+    td.add_project("Inbox", is_inbox=True)
+    ms_default = ms.create_list("Tasks")
+    ms.lists[ms_default["id"]]["wellknownListName"] = "defaultList"
+    g_default = gg.create_list("My Tasks")
+    gg._default_id = g_default["id"]
+
+    td.add_project("Flagged Emails")
+    gg.create_list("Flagged Emails")
+    ms.create_list("Flagged Emails")          # duplicate #1
+    ms.create_list("Flagged Emails")          # duplicate #2 -- same name, different id
+
+    sync_once(store, clients, cfg)
+    g1 = next(g for g in store.all_list_groups() if g["name"] == "Flagged Emails")
+    first_mstodo_id = g1["members"].get("mstodo")
+    check("T1: one of the two duplicates wins the slot on the first cycle",
+          first_mstodo_id is not None, f"members={g1['members']}")
+
+    # Run several more cycles -- the old behavior would swap the mstodo
+    # member every single time; the fix must keep it stable.
+    for _ in range(4):
+        sync_once(store, clients, cfg)
+        g_now = next(g for g in store.all_list_groups() if g["name"] == "Flagged Emails")
+        check("T2: the mstodo member stays the same list across cycles",
+              g_now["members"].get("mstodo") == first_mstodo_id,
+              f"was {first_mstodo_id}, now {g_now['members'].get('mstodo')}")
+
+    check("T3: exactly one list_group named 'Flagged Emails' exists (no duplicate groups)",
+          sum(1 for g in store.all_list_groups() if g["name"] == "Flagged Emails") == 1)
+
+    store.close()
+    os.remove(path)
+
+
 def run_late_join_test():
     """Regression: connecting Google (or any provider) AFTER the others
     already have a default group must join that existing group, not spawn a
@@ -793,6 +842,8 @@ if __name__ == "__main__":
     run()
     print("\n=== late-join list reconciliation test ===")
     run_late_join_test()
+    print("\n=== duplicate same-provider list stability test ===")
+    run_duplicate_list_test()
     print("\n=== MS reminder/due-time test ===")
     run_ms_reminder_due_test()
     print("\n=== list deletion propagation test ===")

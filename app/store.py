@@ -233,10 +233,22 @@ class Store:
         return self.db.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     def add_list_group_member(self, group_id, provider, list_id):
-        self.db.execute(
-            "INSERT OR REPLACE INTO list_group_members(group_id,provider,list_id) VALUES (?,?,?)",
+        """INSERT OR IGNORE, not REPLACE: once a group has a provider's list
+        assigned, later calls for the SAME (group, provider) must never
+        steal that slot. Two lists on one provider with the same name (e.g.
+        an accidental duplicate) would otherwise alternate forever -- each
+        cycle's reconcile_lists sees whichever one isn't currently the
+        member as "unpaired" and swaps it in, undoing the previous cycle's
+        assignment and never converging.
+
+        Returns True if this call actually assigned the slot, False if it
+        was already taken by a different list_id (the caller can use this
+        to warn about a duplicate instead of silently doing nothing)."""
+        cur = self.db.execute(
+            "INSERT OR IGNORE INTO list_group_members(group_id,provider,list_id) VALUES (?,?,?)",
             (group_id, provider, list_id),
         )
+        return cur.rowcount > 0
 
     def list_group_members(self, group_id):
         return {r["provider"]: r["list_id"] for r in self.db.execute(

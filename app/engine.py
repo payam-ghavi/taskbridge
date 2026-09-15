@@ -139,12 +139,20 @@ def reconcile_lists(store, clients):
     for provider, lists in provider_lists.items():
         for l in lists:
             if (provider, l["id"]) in already_grouped:
-                store.log("info", f"DEBUG {provider} list {l['id']!r} {l['name']!r} "
-                                   f"already_grouped, skipping")
                 continue
-            pending.setdefault(_identity_key(l), {})[provider] = l
-            store.log("info", f"DEBUG {provider} list {l['id']!r} {l['name']!r} -> pending "
-                               f"key={_identity_key(l)!r}")
+            key = _identity_key(l)
+            by_provider = pending.setdefault(key, {})
+            if provider in by_provider:
+                # Two of this SAME provider's lists both want this identity
+                # key (most often two lists with the same name) -- keep
+                # whichever was seen first this cycle and leave the other
+                # alone. Silently letting the second one win here is exactly
+                # what used to make pairing flip-flop forever between them.
+                store.log("error", f"{provider} has more than one list named "
+                                    f"{l['name']!r} — only one can be paired; "
+                                    f"delete the extra one to clean this up")
+                continue
+            by_provider[provider] = l
 
     for key, by_provider in pending.items():
         group_id = group_id_by_key.get(key)
@@ -153,7 +161,10 @@ def reconcile_lists(store, clients):
             group_id = store.add_list_group(display_name)
             group_id_by_key[key] = group_id
         for provider, l in by_provider.items():
-            store.add_list_group_member(group_id, provider, l["id"])
+            assigned = store.add_list_group_member(group_id, provider, l["id"])
+            if not assigned:
+                store.log("error", f"{provider} has more than one list named {l['name']!r} — "
+                                    f"only one can be paired; delete the extra one to clean this up")
 
     for g in store.all_list_groups():
         members = g["members"]

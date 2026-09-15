@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.14"
+version: "2.0.15"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -39,6 +39,15 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.15: fixes the actual root cause behind the "Flagged Emails" mystery —
+  two lists with the same name on one connected app (a leftover duplicate)
+  made pairing flip-flop between them forever, every single cycle, and
+  never settle. A list pairing now sticks to whichever list won it first;
+  if a genuine duplicate exists, TaskBridge now says so plainly in Activity
+  instead of silently looping. If you see that message, delete the extra
+  duplicate list on that app.
+
+
   2.0.13: failures that used to only go to the container's own console (a
   rejected Todoist change, a list that couldn't be created to match another
   app, a task update that failed) now always show up in the Activity feed
