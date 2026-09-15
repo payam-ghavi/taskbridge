@@ -42,6 +42,7 @@ class TodoistClient:
         self.s.headers["Authorization"] = f"Bearer {token}"
         self.items = {}
         self.projects = {}
+        self.account_tz = None
 
     def _sync(self, resource_types, commands=None):
         data = {"sync_token": self.sync_token, "resource_types": json.dumps(resource_types)}
@@ -66,9 +67,13 @@ class TodoistClient:
         """Incremental items+projects since ``sync_token``, plus a *full*
         projects refresh — list reconciliation needs the complete current
         project set every cycle, not just the ones that changed, and unlike
-        items (which can be large), projects are cheap to fetch in full."""
+        items (which can be large), projects are cheap to fetch in full.
+        Also refreshes the account's timezone (see account_tz) -- needed to
+        interpret a due date's floating local time, since a due object often
+        has no timezone of its own and just means "local to the account"."""
         j = self._sync(["projects", "items"])
         self._full_sync_projects()
+        self._full_sync_user()
         return j
 
     def _full_sync_projects(self):
@@ -77,6 +82,13 @@ class TodoistClient:
         r.raise_for_status()
         for pr in r.json().get("projects", []):
             self.projects[pr["id"]] = pr
+
+    def _full_sync_user(self):
+        data = {"sync_token": "*", "resource_types": json.dumps(["user"])}
+        r = self.s.post(f"{self.base}/sync", data=data, timeout=90)
+        r.raise_for_status()
+        user = r.json().get("user") or {}
+        self.account_tz = (user.get("tz_info") or {}).get("timezone")
 
     def apply(self, commands):
         if not commands or self.dry_run:

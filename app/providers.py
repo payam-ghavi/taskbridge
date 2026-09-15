@@ -17,9 +17,9 @@ from .todoist_client import cmd_item_add, cmd_item_delete, cmd_item_update
 NotFoundErrors = (GraphNotFound, GoogleNotFound)
 
 
-def to_canonical(provider, raw_item):
+def to_canonical(provider, raw_item, client=None):
     if provider == "todoist":
-        return C.item_to_canonical(raw_item)
+        return C.item_to_canonical(raw_item, account_tz=getattr(client, "account_tz", None))
     if provider == "mstodo":
         return C.task_to_canonical(raw_item)
     if provider == "google":
@@ -80,7 +80,7 @@ def find_unmapped_match(provider, client, list_id, canon, mapped_ids):
                 continue
             if item.get("project_id") != list_id:
                 continue
-            ic = C.item_to_canonical(item)
+            ic = C.item_to_canonical(item, account_tz=getattr(client, "account_tz", None))
             if not ic["completed"] and ic["title"] == canon["title"] and ic["due"] == canon["due"]:
                 return tid, item
         return None

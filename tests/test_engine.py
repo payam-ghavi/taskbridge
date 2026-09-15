@@ -43,6 +43,7 @@ class FakeTodoist:
         self.items = {}
         self.projects = {}
         self.sync_token = "0"
+        self.account_tz = None
         self.calls = {"add": 0, "update": 0, "delete": 0, "complete": 0}
 
     def _touch(self, kind, oid):
@@ -404,6 +405,84 @@ def run():
           ms.tasks[ms_list_id][ms_id2]["title"])
     check("G2: Todoist's own item keeps its own edit",
           td.current_item(tid2)["content"] == "Pay RENT (todoist edit)")
+
+    store.close()
+    os.remove(path)
+
+
+def run_todoist_local_time_test():
+    """Regression: seen live on a real account -- a Todoist task due "10:00
+    AM" (the account's own local time, e.g. Pacific/UTC-7) synced to
+    Microsoft To Do as 3:00 AM. Unlike Microsoft's reminderDateTime (always
+    explicit UTC) and Google's due timestamp (UTC when it carries a time at
+    all), Todoist's due.date time component is a *floating local* value --
+    meaningless without knowing which zone "local" is. item_to_canonical
+    must convert it to UTC using due.timezone if present, else the account's
+    own timezone (TodoistClient.account_tz), before it's usable as canon
+    due_time -- otherwise it gets relabeled "UTC" when written onward and
+    shifted by the zone offset when the target provider converts it back to
+    a real local display."""
+    # Explicit per-task timezone on the due object itself.
+    item_with_due_tz = {
+        "content": "x", "description": "", "priority": 1, "checked": False, "completed_at": None,
+        "due": {"date": "2026-09-16T10:00:00", "timezone": "America/Los_Angeles"},
+    }
+    c1 = C.item_to_canonical(item_with_due_tz)
+    check("R1: due.timezone alone converts 10:00 PDT to the correct UTC time",
+          c1["due"] == "2026-09-16" and c1["due_time"] == "17:00", f"got {c1}")
+
+    # No due.timezone -- falls back to the account's own timezone.
+    item_no_due_tz = {
+        "content": "x", "description": "", "priority": 1, "checked": False, "completed_at": None,
+        "due": {"date": "2026-09-16T10:00:00"},
+    }
+    c2 = C.item_to_canonical(item_no_due_tz, account_tz="America/Los_Angeles")
+    check("R2: falls back to account_tz when due.timezone is absent",
+          c2["due"] == "2026-09-16" and c2["due_time"] == "17:00", f"got {c2}")
+
+    # Neither known -- can't convert; falls back to the old best-effort
+    # behavior (raw digits) rather than crashing or dropping the time.
+    c3 = C.item_to_canonical(item_no_due_tz, account_tz=None)
+    check("R3: no timezone known anywhere -> best-effort raw time, no crash",
+          c3["due"] == "2026-09-16" and c3["due_time"] == "10:00", f"got {c3}")
+
+    # A time near midnight can roll over to a different UTC date -- due
+    # itself must be recomputed from the converted instant, not just due_time.
+    item_near_midnight = {
+        "content": "x", "description": "", "priority": 1, "checked": False, "completed_at": None,
+        "due": {"date": "2026-09-16T23:00:00", "timezone": "America/Los_Angeles"},
+    }
+    c4 = C.item_to_canonical(item_near_midnight)
+    check("R4: a late-evening local time rolls the due date forward in UTC",
+          c4["due"] == "2026-09-17" and c4["due_time"] == "06:00", f"got {c4}")
+
+    # End-to-end: TodoistClient.read() populates account_tz from the user
+    # resource, and providers.to_canonical() threads it through.
+    store, path = fresh_store()
+    seed_connections(store)
+    td, ms, gg = FakeTodoist(), FakeGraph(), FakeGoogle()
+    clients = {"todoist": td, "mstodo": ms, "google": gg}
+    cfg = Config(conflict_winner="todoist", match_existing=True)
+
+    td_inbox = td.add_project("Inbox", is_inbox=True)
+    ms_default = ms.create_list("Tasks")
+    ms.lists[ms_default["id"]]["wellknownListName"] = "defaultList"
+    g_default = gg.create_list("My Tasks")
+    gg._default_id = g_default["id"]
+    sync_once(store, clients, cfg)
+
+    td.account_tz = "America/Los_Angeles"
+    tid = td.seed_item(content="Todoist task", project_id=td_inbox,
+                        due={"date": "2026-09-16T10:00:00", "timezone": "America/Los_Angeles"})
+    sync_once(store, clients, cfg)
+    group = store.task_group_for("todoist", tid)
+    check("R5: end-to-end, the stored canon holds the UTC-converted time",
+          group is not None and group["canon"]["due_time"] == "17:00", f"group={group}")
+    ms_id = group["links"]["mstodo"]["item_id"]
+    ms_list = group["links"]["mstodo"]["list_id"]
+    check("R6: Microsoft's reminderDateTime is the correct UTC instant (17:00, not 10:00)",
+          ms.tasks[ms_list][ms_id]["reminderDateTime"]["dateTime"] == "2026-09-16T17:00:00",
+          f"got {ms.tasks[ms_list][ms_id].get('reminderDateTime')}")
 
     store.close()
     os.remove(path)
@@ -846,6 +925,8 @@ if __name__ == "__main__":
     run_duplicate_list_test()
     print("\n=== MS reminder/due-time test ===")
     run_ms_reminder_due_test()
+    print("\n=== Todoist local-time-to-UTC conversion test ===")
+    run_todoist_local_time_test()
     print("\n=== list deletion propagation test ===")
     run_list_deletion_test()
     print("\n=== simultaneous cross-provider deletion test ===")

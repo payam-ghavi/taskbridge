@@ -13,6 +13,8 @@ simply has no opinion about — see ``UNSUPPORTED`` and ``relevant_diff``/``merg
 import hashlib
 import json
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # Fields a given provider cannot represent at all. The engine ignores these
 # fields when comparing that provider's report to the group's stored canon,
@@ -85,7 +87,16 @@ def merge(prev_c, new_c, provider):
 
 # ---- Todoist -----------------------------------------------------------
 
-def item_to_canonical(item):
+def item_to_canonical(item, account_tz=None):
+    """Unlike Microsoft's reminderDateTime (always explicit UTC) and Google's
+    due timestamp (always UTC when it carries a time at all), Todoist's due
+    date/time is a *floating* local value -- "10:00" means 10am in whatever
+    zone the task's own due.timezone says, or the account's own timezone
+    (account_tz, passed in by the caller) when due.timezone is absent. It
+    must be converted to UTC here so due_time always means the same thing
+    everywhere else in the codebase; skipping that is what made a Todoist
+    task due "10:00 local" get written to Microsoft as if it meant 10:00
+    UTC, landing hours off after Microsoft converted it back to local."""
     due, due_time = None, None
     d = item.get("due")
     if d:
@@ -93,7 +104,17 @@ def item_to_canonical(item):
         if raw:
             due = raw[:10]
             if len(raw) > 10:
-                due_time = raw[11:16]
+                zone = d.get("timezone") or account_tz
+                if zone:
+                    try:
+                        local_dt = datetime.fromisoformat(raw[:19]).replace(tzinfo=ZoneInfo(zone))
+                        utc_dt = local_dt.astimezone(ZoneInfo("UTC"))
+                        due = utc_dt.strftime("%Y-%m-%d")
+                        due_time = utc_dt.strftime("%H:%M")
+                    except Exception:
+                        due_time = raw[11:16]
+                else:
+                    due_time = raw[11:16]
     priority = item.get("priority") or 1          # 1=none .. 4=urgent
     checked = item.get("checked")
     if checked is None:

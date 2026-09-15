@@ -304,8 +304,8 @@ def _handle_new_item(store, clients, queue, pending, provider, list_id, item_id,
             if match:
                 other_id, other_raw = match
                 links[other_provider] = (other_id, other_list_id)
-                merged_canon = C.merge(merged_canon, providers.to_canonical(other_provider, other_raw),
-                                        other_provider)
+                merged_canon = C.merge(merged_canon, providers.to_canonical(
+                    other_provider, other_raw, clients.get(other_provider)), other_provider)
 
     if canon["completed"] and len(links) < len(lg["members"]):
         # Don't resurrect completed history onto a provider that never had this
@@ -349,7 +349,7 @@ def _handle_change(store, clients, queue, pending, provider, list_id, item_id, r
         # still-existing task.
         return
 
-    canon = providers.to_canonical(provider, raw_item)
+    canon = providers.to_canonical(provider, raw_item, clients.get(provider))
     group = store.task_group_for(provider, item_id)
     if group:
         _handle_existing_item(store, clients, queue, group, provider, canon, changed_ids, cfg)
