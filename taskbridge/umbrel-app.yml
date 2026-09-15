@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.12"
+version: "2.0.13"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -39,6 +39,14 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.13: failures that used to only go to the container's own console (a
+  rejected Todoist change, a list that couldn't be created to match another
+  app, a task update that failed) now always show up in the Activity feed
+  too, with the real reason from the provider where available — not just a
+  generic "sync failed." Meant to stay permanently, not just while chasing a
+  specific bug.
+
+
   2.0.11: a list's existence check came back negative for one cycle on a
   real account (a transient API hiccup, not an actual deletion) and 2.0.8's
   same-cycle trigger acted on it immediately, briefly un-pairing lists that

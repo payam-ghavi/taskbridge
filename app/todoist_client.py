@@ -92,14 +92,21 @@ class TodoistClient:
         return temp_map, status
 
     def add_project(self, name):
+        cmd_uuid = _uuid()
         temp = _uuid()
-        temp_map, _ = self.apply([{
-            "type": "project_add", "temp_id": temp, "uuid": _uuid(), "args": {"name": name},
+        temp_map, status = self.apply([{
+            "type": "project_add", "temp_id": temp, "uuid": cmd_uuid, "args": {"name": name},
         }])
-        return temp_map.get(temp)
+        if temp not in temp_map:
+            raise RuntimeError(f"Todoist rejected creating project {name!r}: {status.get(cmd_uuid)}")
+        return temp_map[temp]
 
     def delete_project(self, project_id):
-        self.apply([{"type": "project_delete", "uuid": _uuid(), "args": {"id": project_id}}])
+        cmd_uuid = _uuid()
+        _, status = self.apply([{"type": "project_delete", "uuid": cmd_uuid, "args": {"id": project_id}}])
+        result = status.get(cmd_uuid)
+        if result not in ("ok", None) and not (isinstance(result, dict) and result.get("error_code") is None):
+            raise RuntimeError(f"Todoist rejected deleting project {project_id!r}: {result}")
 
 
 def _due_arg(c):

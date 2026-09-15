@@ -158,16 +158,16 @@ def reconcile_lists(store, clients):
                 continue
             try:
                 new_id = providers.create_list(provider, client, g["name"])
-            except Exception:
+            except Exception as e:
                 log.exception("create_list failed for %s %r", provider, g["name"])
-                store.log("error", f"DEBUG create_list raised for {provider}/{g['name']!r} — see logs")
+                store.log("error", f"Couldn't create a matching {provider} list for {g['name']!r}: "
+                                    f"{e} — will retry next cycle")
                 continue
             if not new_id:
-                store.log("error", f"DEBUG create_list returned falsy for {provider}/{g['name']!r}: {new_id!r}")
-                continue    # dry-run, or the client already logged a failure
+                continue    # dry-run
             store.add_list_group_member(g["id"], provider, new_id)
             members[provider] = new_id
-            store.log("info", f"DEBUG created {provider} list {new_id!r} for {g['name']!r}")
+            store.log("info", f"Created {provider} list {g['name']!r} to match the other connected apps")
 
 
 def _is_removed(provider, raw_item):
@@ -374,9 +374,13 @@ def sync_once(store, clients, cfg):
                 store.commit()
             except Exception:
                 log.exception("%s item %s failed", provider, item_id)
+                store.log("error", f"{provider} task update failed — see logs")
 
     if "todoist" in clients and queue:
-        temp_map, _ = clients["todoist"].apply(queue)
+        temp_map, status = clients["todoist"].apply(queue)
+        for cid, result in status.items():
+            if result != "ok" and not (isinstance(result, dict) and result.get("error_code") is None):
+                store.log("error", f"A Todoist change was rejected: {result}")
         for p in pending:
             links = dict(p["immediate_links"])
             if p["temp_id"]:
@@ -385,6 +389,7 @@ def sync_once(store, clients, cfg):
                     links["todoist"] = (real, p["todoist_list_id"])
                 elif not cfg.dry_run:
                     log.warning("no id returned for new Todoist task %r", p["canon"]["title"])
+                    store.log("error", f"Couldn't create matching Todoist task for {p['canon']['title']!r}")
             if len(links) >= 2:
                 store.create_task_group(p["canon"], links)
         store.commit()
