@@ -139,8 +139,12 @@ def reconcile_lists(store, clients):
     for provider, lists in provider_lists.items():
         for l in lists:
             if (provider, l["id"]) in already_grouped:
+                store.log("info", f"DEBUG {provider} list {l['id']!r} {l['name']!r} "
+                                   f"already_grouped, skipping")
                 continue
             pending.setdefault(_identity_key(l), {})[provider] = l
+            store.log("info", f"DEBUG {provider} list {l['id']!r} {l['name']!r} -> pending "
+                               f"key={_identity_key(l)!r}")
 
     for key, by_provider in pending.items():
         group_id = group_id_by_key.get(key)
