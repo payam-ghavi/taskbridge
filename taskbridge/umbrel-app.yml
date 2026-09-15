@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.15"
+version: "2.0.16"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -12,11 +12,14 @@ description: >-
   one and it shows up in the others within a minute.
 
 
-  What it syncs: task title, notes, due date and time, completion, and
-  priority (as an "important" flag — Google Tasks has no priority field, so
-  it just won't carry one). Lists/projects are matched by name; a missing one
-  is created on connect. Completing or deleting a task does the same
-  everywhere it's linked — and so does deleting a whole list or project.
+  What it syncs: task title, notes, due date, completion, and priority (as
+  an "important" flag — Google Tasks has no priority field, so it just
+  won't carry one). Due time syncs too, but only between Todoist and
+  Microsoft To Do — Google Tasks' own API never exposes a time, either
+  direction, so that part is a Google limitation TaskBridge can't work
+  around. Lists/projects are matched by name; a missing one is created on
+  connect. Completing or deleting a task does the same everywhere it's
+  linked — and so does deleting a whole list or project.
 
 
   Setup: paste a Todoist API token, sign in to Microsoft by entering a short
@@ -39,6 +42,13 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.16: documentation fix — the "due date and time syncs everywhere" claim
+  from 2.0.4 overstated it. Time-of-day genuinely only syncs between Todoist
+  and Microsoft To Do; Google Tasks' own API never exposes a time in either
+  direction, confirmed by testing a task added directly in Google. No code
+  change, just correcting what the app says it does.
+
+
   2.0.15: fixes the actual root cause behind the "Flagged Emails" mystery —
   two lists with the same name on one connected app (a leftover duplicate)
   made pairing flip-flop between them forever, every single cycle, and

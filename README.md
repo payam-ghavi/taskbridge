@@ -10,7 +10,8 @@ in the others within a minute. One small container, no cloud middleman.
 
 | | |
 |---|---|
-| Title, notes, due **date and time**, completion | ✅ across all connected apps. In Microsoft To Do specifically, a time comes from "Remind me" (the only one of its two date controls with a time picker) — it wins over a plain "Add due date" when both are set on the same task, and gets mirrored back onto To Do's own reminder so it's visible there too. |
+| Title, notes, due date, completion | ✅ across all connected apps |
+| Due **time** | ✅ between Todoist and Microsoft To Do (both directions). In Microsoft To Do specifically, a time comes from "Remind me" (the only one of its two date controls with a time picker) — it wins over a plain "Add due date" when both are set on the same task, and gets mirrored back onto To Do's own reminder so it's visible there too. **Google Tasks never carries a time, either direction** — its public API only ever exposes a date, so a time set in Google is dropped, and a time coming from Todoist/To Do just won't show up on the Google side. This is a Google API limitation, not something TaskBridge can work around. |
 | Priority | ✅ as an "important" flag (Todoist P1/P2 ⇄ To Do High importance). Google Tasks has no priority field, so it just won't carry one — the other two still sync it between themselves. |
 | Lists ⇄ Projects ⇄ Task lists | ✅ matched by name; the missing side is created on connect. Default/inbox lists always match regardless of what each app calls them. |
 | Deleting a task | ✅ deletes it everywhere it's linked |
