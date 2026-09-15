@@ -79,9 +79,19 @@ def _handle_list_removed(store, clients, group, gone_provider):
             continue
         try:
             providers.delete_list(other_provider, clients[other_provider], other_list_id)
+            deleted.append((other_provider, other_list_id))
         except providers.NotFoundErrors:
-            pass
-        deleted.append((other_provider, other_list_id))
+            deleted.append((other_provider, other_list_id))   # already gone there too
+        except Exception:
+            # Best-effort cleanup -- a provider refusing the delete (e.g. a
+            # permissions quirk) must never take down the whole sync. Don't
+            # prune it from this cycle's list snapshot either: it's still
+            # really there, so the normal reconcile pass below will just
+            # treat it as newly-unpaired and give it a fresh partner list.
+            log.exception("failed to delete %s list %r while mirroring a deletion from %s",
+                          other_provider, other_list_id, gone_provider)
+            store.log("error", f"Couldn't delete the matching {other_provider} list for "
+                                f"{group['name']!r} — will re-pair it fresh next cycle")
     store.delete_list_group(group["id"])
     store.log("info", f"List {group['name']!r} was deleted on {gone_provider} — removed it everywhere else too")
     return deleted
@@ -318,7 +328,14 @@ def sync_once(store, clients, cfg):
     if "todoist" in clients:
         clients["todoist"].read()
 
-    reconcile_lists(store, clients)
+    try:
+        reconcile_lists(store, clients)
+    except Exception:
+        # List pairing/cleanup is best-effort -- an unexpected failure here
+        # (a provider API quirk, a transient error) must not take down task
+        # sync for every connected provider along with it.
+        log.exception("reconcile_lists failed")
+        store.log("error", "List sync had a problem this cycle — see logs (tasks still synced normally)")
     store.commit()
 
     raw_changes = {p: _gather_changes(store, p, c, clients) for p, c in clients.items()}

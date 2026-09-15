@@ -150,6 +150,7 @@ class FakeGraph:
         self._seq = 0
         self.refresh_token = "fake-ms-refresh"
         self.calls = {"add": 0, "update": 0, "delete": 0}
+        self.fail_delete_list = False   # simulate a provider rejecting the delete (e.g. HTTP 400)
 
     def get_lists(self):
         return list(self.lists.values())
@@ -161,6 +162,8 @@ class FakeGraph:
         return self.lists[lid]
 
     def delete_list(self, list_id):
+        if self.fail_delete_list:
+            raise RuntimeError("simulated 400 Bad Request deleting list")
         self.lists.pop(list_id, None)
         self.tasks.pop(list_id, None)
         self.calls["delete_list"] = self.calls.get("delete_list", 0) + 1
@@ -472,6 +475,44 @@ def run_ms_reminder_due_test():
           due_cmd["args"]["due"] == {"date": "2026-09-24"}, f"got {due_cmd['args'].get('due')}")
 
 
+def run_list_delete_failure_test():
+    """Regression: if deleting the mirror list on another provider fails for
+    a reason OTHER than "already gone" (a live 400 from Microsoft Graph on a
+    real account triggered this), that must not crash the sync -- the list
+    was already known-deleted on its own provider and that half of the
+    cleanup has to go through regardless of whether the mirror delete
+    succeeded elsewhere."""
+    store, path = fresh_store()
+    seed_connections(store)
+    td, ms, gg = FakeTodoist(), FakeGraph(), FakeGoogle()
+    clients = {"todoist": td, "mstodo": ms, "google": gg}
+    cfg = Config(conflict_winner="todoist", match_existing=True)
+
+    td.add_project("Inbox", is_inbox=True)
+    ms_default = ms.create_list("Tasks")
+    ms.lists[ms_default["id"]]["wellknownListName"] = "defaultList"
+    g_default = gg.create_list("My Tasks")
+    gg._default_id = g_default["id"]
+
+    td_work = td.add_project("Work")
+    sync_once(store, clients, cfg)   # forms default group + a Work group across all 3
+
+    ms.fail_delete_list = True
+    gg.delete_list(next(g for g in store.all_list_groups() if g["name"] == "Work")["members"]["google"])
+
+    try:
+        sync_once(store, clients, cfg)   # Google's Work list is gone; deleting MS's mirror will "fail"
+        crashed = False
+    except Exception as e:
+        crashed = True
+        crash_detail = repr(e)
+    check("V1: a failed mirror-list delete doesn't crash the sync",
+          not crashed, "" if not crashed else crash_detail)
+
+    store.close()
+    os.remove(path)
+
+
 def run_simultaneous_deletion_test():
     """Regression: deleting the SAME task, or the SAME list, on two providers
     in the same cycle (e.g. the user deletes it in Todoist right as Microsoft
@@ -705,6 +746,8 @@ if __name__ == "__main__":
     run_list_deletion_test()
     print("\n=== simultaneous cross-provider deletion test ===")
     run_simultaneous_deletion_test()
+    print("\n=== list-delete-failure resilience test ===")
+    run_list_delete_failure_test()
     print("\n=== v1 -> v2 migration test ===")
     run_migration_test()
     print(f"\n{'ALL PASSED' if not FAILURES else f'{len(FAILURES)} FAILED: ' + ', '.join(FAILURES)}")
