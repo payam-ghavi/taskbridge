@@ -105,17 +105,29 @@ def reconcile_lists(store, clients):
     existing_ids = {p: {l["id"] for l in lists} for p, lists in provider_lists.items()}
 
     # A list a group used to have on some provider is no longer there ->
-    # that provider deleted it. Mirror the deletion everywhere else instead
-    # of leaving the group pointing at a list that no longer exists (which
-    # would otherwise crash the next step that tries to read it).
+    # either that provider deleted it, or this cycle's fetch had a transient
+    # hiccup. Since acting on this deletes the list everywhere else, require
+    # it to be missing on two consecutive cycles before touching anything --
+    # a single missing-list report is not enough evidence on its own.
     for g in store.all_list_groups():
         for provider, list_id in g["members"].items():
-            if provider in existing_ids and list_id not in existing_ids[provider]:
-                deleted = _handle_list_removed(store, clients, g, provider)
-                for dp, dlid in deleted:
-                    existing_ids[dp].discard(dlid)
-                    provider_lists[dp] = [l for l in provider_lists[dp] if l["id"] != dlid]
-                break
+            if provider not in existing_ids:
+                continue
+            marker = f"list_missing:{g['id']}:{provider}"
+            if list_id not in existing_ids[provider]:
+                if store.get(marker) == "1":
+                    store.delete(marker)
+                    deleted = _handle_list_removed(store, clients, g, provider)
+                    for dp, dlid in deleted:
+                        existing_ids[dp].discard(dlid)
+                        provider_lists[dp] = [l for l in provider_lists[dp] if l["id"] != dlid]
+                    break
+                else:
+                    store.set(marker, "1")
+                    store.log("info", f"{provider} list for {g['name']!r} wasn't in this cycle's "
+                                       f"list fetch — confirming next cycle before treating it as deleted")
+            else:
+                store.delete(marker)
 
     already_grouped = {(p, lid) for g in store.all_list_groups() for p, lid in g["members"].items()}
     group_id_by_key = {}

@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.10"
+version: "2.0.11"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -39,6 +39,16 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.11: a list's existence check came back negative for one cycle on a
+  real account (a transient API hiccup, not an actual deletion) and 2.0.8's
+  same-cycle trigger acted on it immediately, briefly un-pairing lists that
+  were never actually deleted (self-healed the next cycle, nothing was
+  lost — Todoist and Microsoft both refuse to delete a default/protected
+  list anyway, which is what saved it here). A list must now be missing on
+  two consecutive cycles before anything gets deleted, so a single bad API
+  response can never trigger a cross-platform deletion again.
+
+
   2.0.10: fixes a real-world case that slipped past 2.0.9 — when the mirror
   list delete itself was rejected by a provider (seen live: Microsoft Graph
   returned a 400 trying to delete a list), that failure crashed the whole

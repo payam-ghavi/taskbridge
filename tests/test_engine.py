@@ -475,6 +475,52 @@ def run_ms_reminder_due_test():
           due_cmd["args"]["due"] == {"date": "2026-09-24"}, f"got {due_cmd['args'].get('due')}")
 
 
+def run_list_delete_false_positive_test():
+    """Regression: seen live on a real account -- a list's get_lists() fetch
+    came back without it for exactly one cycle (a transient API hiccup, not
+    an actual deletion), and the old one-cycle-trigger design immediately
+    cascaded a real deletion across every other connected provider before
+    self-healing. A list missing for a single cycle that reappears the next
+    must not trigger anything at all."""
+    store, path = fresh_store()
+    seed_connections(store)
+    td, ms, gg = FakeTodoist(), FakeGraph(), FakeGoogle()
+    clients = {"todoist": td, "mstodo": ms, "google": gg}
+    cfg = Config(conflict_winner="todoist", match_existing=True)
+
+    td.add_project("Inbox", is_inbox=True)
+    ms_default = ms.create_list("Tasks")
+    ms.lists[ms_default["id"]]["wellknownListName"] = "defaultList"
+    g_default = gg.create_list("My Tasks")
+    gg._default_id = g_default["id"]
+
+    td_work = td.add_project("Work")
+    sync_once(store, clients, cfg)   # forms default group + a Work group across all 3
+    g_work = next(g for g in store.all_list_groups() if g["name"] == "Work")
+    google_work_id = g_work["members"]["google"]
+    delete_calls_before = td.calls.get("delete_project", 0), ms.calls.get("delete_list", 0)
+
+    # Simulate a transient glitch: Google's list briefly missing from the
+    # fetch for one cycle (NOT actually deleted -- still in gg.lists).
+    real_get_lists = gg.get_lists
+    gg.get_lists = lambda: [l for l in real_get_lists() if l["id"] != google_work_id]
+    sync_once(store, clients, cfg)   # cycle 1: looks missing, only marks it
+    check("U1: the Work group survives a single missing-list cycle",
+          any(g["name"] == "Work" for g in store.all_list_groups()))
+    check("U2: nothing was actually deleted on the first cycle",
+          (td.calls.get("delete_project", 0), ms.calls.get("delete_list", 0)) == delete_calls_before)
+
+    gg.get_lists = real_get_lists   # glitch clears -- the list is really still there
+    sync_once(store, clients, cfg)   # cycle 2: back to normal, marker must clear
+    check("U3: the Work group is untouched once the list reappears",
+          any(g["name"] == "Work" for g in store.all_list_groups()))
+    check("U4: still nothing deleted",
+          (td.calls.get("delete_project", 0), ms.calls.get("delete_list", 0)) == delete_calls_before)
+
+    store.close()
+    os.remove(path)
+
+
 def run_list_delete_failure_test():
     """Regression: if deleting the mirror list on another provider fails for
     a reason OTHER than "already gone" (a live 400 from Microsoft Graph on a
@@ -501,7 +547,8 @@ def run_list_delete_failure_test():
     gg.delete_list(next(g for g in store.all_list_groups() if g["name"] == "Work")["members"]["google"])
 
     try:
-        sync_once(store, clients, cfg)   # Google's Work list is gone; deleting MS's mirror will "fail"
+        sync_once(store, clients, cfg)   # cycle 1: marks Google's Work list missing
+        sync_once(store, clients, cfg)   # cycle 2: confirmed -> deleting MS's mirror "fails"
         crashed = False
     except Exception as e:
         crashed = True
@@ -568,7 +615,8 @@ def run_simultaneous_deletion_test():
     gg.delete_list(google_work_id)                         # gone on Google too, same cycle
 
     try:
-        sync_once(store, clients, cfg)
+        sync_once(store, clients, cfg)   # cycle 1: marks both missing
+        sync_once(store, clients, cfg)   # cycle 2: confirmed -> acts
         crashed = False
     except Exception as e:
         crashed = True
@@ -589,7 +637,9 @@ def run_list_deletion_test():
     level. Previously a list vanishing on Microsoft or Google crashed the
     entire sync cycle (NotFound propagating out of _gather_changes); now
     reconcile_lists notices it proactively (list missing from get_lists())
-    and tears the group down everywhere before anything tries to read it."""
+    and tears the group down everywhere before anything tries to read it.
+    Confirmation takes two consecutive cycles (see run_list_delete_false_
+    positive_test) -- the first marks it, the second acts."""
     store, path = fresh_store()
     seed_connections(store)
     td, ms, gg = FakeTodoist(), FakeGraph(), FakeGoogle()
@@ -622,7 +672,10 @@ def run_list_deletion_test():
 
     # Simulate deleting the "Groceries" list on Todoist's side.
     td.delete_project(td_groceries)
-    sync_once(store, clients, cfg)   # must not raise
+    sync_once(store, clients, cfg)   # cycle 1: marks it missing, doesn't act yet
+    check("X0b: nothing happens on the first missing-list cycle",
+          any(g["name"] == "Groceries" for g in store.all_list_groups()))
+    sync_once(store, clients, cfg)   # cycle 2: confirmed -> acts. must not raise
 
     check("X1: the Groceries list group is gone from the store",
           not any(g["name"] == "Groceries" for g in store.all_list_groups()))
@@ -748,6 +801,8 @@ if __name__ == "__main__":
     run_simultaneous_deletion_test()
     print("\n=== list-delete-failure resilience test ===")
     run_list_delete_failure_test()
+    print("\n=== list-delete false-positive protection test ===")
+    run_list_delete_false_positive_test()
     print("\n=== v1 -> v2 migration test ===")
     run_migration_test()
     print(f"\n{'ALL PASSED' if not FAILURES else f'{len(FAILURES)} FAILED: ' + ', '.join(FAILURES)}")
