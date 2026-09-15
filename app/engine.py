@@ -156,11 +156,18 @@ def reconcile_lists(store, clients):
         for provider, client in clients.items():
             if provider in members:
                 continue
-            new_id = providers.create_list(provider, client, g["name"])
+            try:
+                new_id = providers.create_list(provider, client, g["name"])
+            except Exception:
+                log.exception("create_list failed for %s %r", provider, g["name"])
+                store.log("error", f"DEBUG create_list raised for {provider}/{g['name']!r} — see logs")
+                continue
             if not new_id:
+                store.log("error", f"DEBUG create_list returned falsy for {provider}/{g['name']!r}: {new_id!r}")
                 continue    # dry-run, or the client already logged a failure
             store.add_list_group_member(g["id"], provider, new_id)
             members[provider] = new_id
+            store.log("info", f"DEBUG created {provider} list {new_id!r} for {g['name']!r}")
 
 
 def _is_removed(provider, raw_item):
