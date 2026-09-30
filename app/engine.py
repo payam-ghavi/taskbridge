@@ -237,6 +237,16 @@ def _gather_changes(store, provider, client, clients):
             for removed_id in known_ids - current_ids:
                 out.append((list_id, removed_id, None))
             for t in items:
+                # A full fetch returns every task, changed or not. Only report
+                # the ones that differ from the group's stored canon: otherwise
+                # (a) Google counts as having "touched" every linked task every
+                # cycle, which defeats conflict_winner exactly like the 2.0.3
+                # Todoist cursor bug, and (b) this pre-cycle snapshot of a task
+                # another provider changes later in the SAME cycle looks like a
+                # Google edit back to the old value and reverts that change.
+                group = store.task_group_for("google", t["id"])
+                if group and not C.relevant_diff(C.gtask_to_canonical(t), group["canon"], "google"):
+                    continue
                 out.append((list_id, t["id"], t))
         return out
 
@@ -417,4 +427,10 @@ def sync_once(store, clients, cfg):
             store.update_creds(provider, {**conn["creds"], "refresh_token": clients[provider].refresh_token})
     store.commit()
 
-    return {p: len(ids) for p, ids in changed_ids.items()}
+    # Google's full fetch keeps returning completed tasks that were never linked
+    # (history that's deliberately not copied elsewhere); they're re-examined
+    # every cycle but aren't changes, so leave them out of the reported count.
+    return {p: sum(1 for _, iid, raw in items
+                   if not (p == "google" and raw is not None and raw.get("status") == "completed"
+                           and not store.task_group_for(p, iid)))
+            for p, items in raw_changes.items()}

@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.17"
+version: "2.0.18"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -42,6 +42,17 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.18: fixes Google Tasks treating every task as "changed" on every sync.
+  Google has no "what changed" feed, so TaskBridge re-reads everything, and
+  it was counting all of it as edits. Two visible effects are gone: a
+  completion or edit made in Todoist or Microsoft To Do could briefly flip
+  back for a minute before re-applying (for a recurring Todoist task that
+  could skip an occurrence), and Activity no longer fills up with a
+  "Synced" line every minute when nothing actually changed. Also, choosing
+  Google as the conflict winner no longer silently drops edits from the
+  other apps.
+
+
   2.0.17: fixes a second due-time timezone bug — a Todoist task due "10:00
   AM" (your own local time) was landing on Microsoft To Do as 3:00 AM.
   Unlike Microsoft and Google, Todoist's due time is a floating local value

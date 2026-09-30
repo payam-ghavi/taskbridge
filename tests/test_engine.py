@@ -4,6 +4,7 @@ completely unmodified). No network calls; no pytest dependency.
 
 Run:  python tests/test_engine.py
 """
+import copy
 import itertools
 import os
 import sys
@@ -170,7 +171,9 @@ class FakeGraph:
         self.calls["delete_list"] = self.calls.get("delete_list", 0) + 1
 
     def list_tasks(self, list_id):
-        return list(self.tasks.get(list_id, {}).values())
+        # Real API: a JSON snapshot taken at fetch time, NOT live objects --
+        # later writes in the same cycle must not show up in it.
+        return copy.deepcopy(list(self.tasks.get(list_id, {}).values()))
 
     def _touch(self, list_id, task_id):
         self._seq += 1
@@ -242,7 +245,9 @@ class FakeGoogle:
         self.calls["delete_list"] = self.calls.get("delete_list", 0) + 1
 
     def list_tasks(self, list_id):
-        return list(self.tasks.get(list_id, {}).values())
+        # Real API: a JSON snapshot taken at fetch time, NOT live objects --
+        # later writes in the same cycle must not show up in it.
+        return copy.deepcopy(list(self.tasks.get(list_id, {}).values()))
 
     def create_task(self, list_id, body):
         tid = new_id("gtask")
@@ -867,6 +872,73 @@ def run_late_join_test():
     os.remove(path)
 
 
+def run_google_full_fetch_test():
+    """Regression (2.0.18): Google has no delta feed, so every cycle's full
+    fetch used to count EVERY linked Google task as changed. That (a) made
+    conflict_winner="google" silently drop every Todoist/Microsoft edit, and
+    (b) let Google's pre-cycle snapshot of a task that another provider
+    changed earlier in the same cycle revert that change (a completion made
+    in Microsoft got un-completed, then re-completed a cycle later)."""
+    for winner in ("todoist", "google"):
+        store, path = fresh_store()
+        seed_connections(store)
+        td, ms, gg = FakeTodoist(), FakeGraph(), FakeGoogle()
+        clients = {"todoist": td, "mstodo": ms, "google": gg}
+        cfg = Config(conflict_winner=winner, match_existing=True)
+
+        td_inbox = td.add_project("Inbox", is_inbox=True)
+        ms_default = ms.create_list("Tasks")
+        ms.lists[ms_default["id"]]["wellknownListName"] = "defaultList"
+        g_default = gg.create_list("My Tasks")
+        gg._default_id = g_default["id"]
+        sync_once(store, clients, cfg)
+
+        tid = td.seed_item(content="Pay rent", project_id=td_inbox)
+        sync_once(store, clients, cfg)
+        group = store.task_group_for("todoist", tid)
+        ms_list, ms_id = group["links"]["mstodo"]["list_id"], group["links"]["mstodo"]["item_id"]
+        g_list, g_id = group["links"]["google"]["list_id"], group["links"]["google"]["item_id"]
+
+        result = sync_once(store, clients, cfg)
+        check(f"GF1[{winner}]: idle cycle reports 0 Google changes", result.get("google") == 0,
+              f"result={result}")
+
+        # edit + complete in Microsoft, nothing touched on Google
+        ms.tasks[ms_list][ms_id]["title"] = "Pay rent (Oct)"
+        ms.tasks[ms_list][ms_id]["status"] = "completed"
+        ms._touch(ms_list, ms_id)
+        sync_once(store, clients, cfg)
+        check(f"GF2[{winner}]: Microsoft edit reaches Todoist",
+              td.current_item(tid)["content"] == "Pay rent (Oct)", td.current_item(tid)["content"])
+        check(f"GF3[{winner}]: Microsoft completion reaches Todoist", td.current_item(tid)["checked"])
+        check(f"GF4[{winner}]: Microsoft edit reaches Google",
+              gg.tasks[g_list][g_id]["title"] == "Pay rent (Oct)", gg.tasks[g_list][g_id]["title"])
+        check(f"GF5[{winner}]: Microsoft task not reverted by Google's stale snapshot",
+              ms.tasks[ms_list][ms_id]["title"] == "Pay rent (Oct)"
+              and ms.tasks[ms_list][ms_id]["status"] == "completed",
+              f"ms={ms.tasks[ms_list][ms_id]}")
+        stored = store.get_task_group(group["id"])["canon"]
+        check(f"GF6[{winner}]: stored canon has the edit", stored["title"] == "Pay rent (Oct)"
+              and stored["completed"], f"canon={stored}")
+
+        calls_before = (dict(td.calls), dict(ms.calls), dict(gg.calls))
+        result = sync_once(store, clients, cfg)
+        calls_after = (dict(td.calls), dict(ms.calls), dict(gg.calls))
+        check(f"GF7[{winner}]: next cycle is idle (no flip-flop writes)",
+              calls_before == calls_after and result.get("google") == 0,
+              f"before={calls_before} after={calls_after} result={result}")
+
+        # a real Google edit is still picked up and counted
+        gg.tasks[g_list][g_id]["title"] = "Pay rent (Nov)"
+        result = sync_once(store, clients, cfg)
+        check(f"GF8[{winner}]: real Google edit still propagates and counts",
+              td.current_item(tid)["content"] == "Pay rent (Nov)" and result.get("google") == 1,
+              f"todoist={td.current_item(tid)['content']} result={result}")
+
+        store.close()
+        os.remove(path)
+
+
 def run_migration_test():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -935,6 +1007,8 @@ if __name__ == "__main__":
     run_list_delete_failure_test()
     print("\n=== list-delete false-positive protection test ===")
     run_list_delete_false_positive_test()
+    print("\n=== Google full-fetch change detection test ===")
+    run_google_full_fetch_test()
     print("\n=== v1 -> v2 migration test ===")
     run_migration_test()
     print(f"\n{'ALL PASSED' if not FAILURES else f'{len(FAILURES)} FAILED: ' + ', '.join(FAILURES)}")
