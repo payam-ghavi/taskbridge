@@ -2,7 +2,6 @@
 import logging
 import threading
 import time
-import traceback
 
 from .engine import Config, sync_once
 from .google_client import GoogleTasksClient
@@ -25,6 +24,24 @@ def _build_client(provider, creds, store=None, dry_run=False):
     raise ValueError(provider)
 
 
+_HOST_PROVIDER = (
+    ("todoist.com", "todoist"),
+    ("microsoft", "mstodo"),       # graph.microsoft.com, login.microsoftonline.com
+    ("googleapis.com", "google"),
+)
+
+
+def _crash_reason(e):
+    """One line for the Activity feed: which app (when the exception carries a
+    request URL, as every `requests` error does) plus the error itself."""
+    text = f"{type(e).__name__}: {e}".strip().splitlines()[0][:240]
+    url = getattr(getattr(e, "request", None), "url", None) or ""
+    for host, provider in _HOST_PROVIDER:
+        if host in url:
+            return f"{PROVIDER_LABEL.get(provider, provider)} — {text}"
+    return text
+
+
 class SyncLoop(threading.Thread):
     def __init__(self, db_path):
         super().__init__(daemon=True)
@@ -42,20 +59,27 @@ class SyncLoop(threading.Thread):
 
     def run(self):
         while not self._stop.is_set():
-            interval = 60
-            try:
-                interval = self._cycle()
-            except Exception:
-                log.exception("sync cycle crashed")
-                try:
-                    with Store(self.db_path) as s:
-                        s.set("status:last_error", traceback.format_exc().strip().splitlines()[-1])
-                        s.set("status:last_sync_at", str(time.time()))
-                        s.log("error", "Sync failed — see logs")
-                except Exception:
-                    pass
+            interval = self._run_once()
             self._wake.wait(timeout=max(15, interval))
             self._wake.clear()
+
+    def _run_once(self):
+        try:
+            return self._cycle()
+        except Exception as e:
+            log.exception("sync cycle crashed")
+            # The container's own log is out of reach on Umbrel (no docker
+            # access), and status:last_error is cleared by the next good
+            # cycle -- so the reason has to land in the Activity feed itself.
+            reason = _crash_reason(e)
+            try:
+                with Store(self.db_path) as s:
+                    s.set("status:last_error", reason)
+                    s.set("status:last_sync_at", str(time.time()))
+                    s.log("error", f"Sync failed: {reason}")
+            except Exception:
+                pass
+            return 60
 
     def _cycle(self):
         store = Store(self.db_path)

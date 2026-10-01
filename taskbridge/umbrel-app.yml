@@ -4,7 +4,7 @@ name: TaskBridge
 tagline: Sync tasks across Microsoft To Do, Todoist, and Google Tasks
 icon: https://raw.githubusercontent.com/payam-ghavi/taskbridge/main/taskbridge/icon.svg
 category: automation
-version: "2.0.18"
+version: "2.0.19"
 port: 3737
 description: >-
   TaskBridge keeps your tasks in sync across Microsoft To Do, Todoist, and
@@ -42,6 +42,13 @@ gallery:
   - 2.png
   - 3.png
 releaseNotes: >-
+  2.0.19: when a sync cycle fails outright, Activity now says why and which
+  app it was talking to (for example "Sync failed: Todoist — ReadTimeout:
+  Read timed out") instead of only "Sync failed — see logs". Those logs live
+  inside the container, which isn't easy to reach on Umbrel. No change to how
+  syncing works.
+
+
   2.0.18: fixes Google Tasks treating every task as "changed" on every sync.
   Google has no "what changed" feed, so TaskBridge re-reads everything, and
   it was counting all of it as edits. Two visible effects are gone: a
